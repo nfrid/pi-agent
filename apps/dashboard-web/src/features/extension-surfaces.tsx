@@ -3,6 +3,7 @@ export type { ExtensionSurface as LiveExtensionSurface } from '@pi-dashboard/ext
 export {
   createDelegateHistoryRefreshCoordinator,
   type DelegateHistoryRefreshCoordinator,
+  delegateHistoryPendingRunIds,
   delegateHistoryRevisionChanged,
 } from './delegate/history-refresh';
 export { DelegateHistorySurface } from './delegate/history-surface';

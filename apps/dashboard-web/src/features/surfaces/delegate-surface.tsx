@@ -323,6 +323,7 @@ export function DelegateSurface({
   history,
   historyLoading = false,
   historyError,
+  settlingRunIds,
   onRunSelected,
   detail,
   store,
@@ -334,6 +335,7 @@ export function DelegateSurface({
   history?: import('@pi-dashboard/protocol').DelegateHistoryResponse;
   historyLoading?: boolean;
   historyError?: unknown;
+  settlingRunIds?: ReadonlySet<string>;
   onRunSelected?: (run: DelegateCompositeRun) => void;
   detail?: DelegateInspectorDetailState;
   store?: import('@pi-dashboard/client').DashboardLiveStore;
@@ -345,9 +347,14 @@ export function DelegateSurface({
   const composite = useMemo(
     () =>
       history
-        ? composeDelegateHistory(history, liveRows, model.wakes ?? [])
+        ? composeDelegateHistory(
+            history,
+            liveRows,
+            model.wakes ?? [],
+            settlingRunIds,
+          )
         : undefined,
-    [history, liveRows, model.wakes],
+    [history, liveRows, model.wakes, settlingRunIds],
   );
   const rows = composite?.groups.map((group) => group.row) ?? liveRows;
   const wakes = composite?.wakes ?? model.wakes ?? [];

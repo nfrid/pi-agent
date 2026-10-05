@@ -102,22 +102,49 @@ const historyDetail = {
 
 async function inspectPersistedDelegate(
   page: Page,
-  { canonicalTranscript = false, compactContext = false } = {},
+  {
+    canonicalTranscript = false,
+    compactContext = false,
+    manyDelegates = false,
+    authorizedLeaf = 'leaf-1',
+  }: {
+    canonicalTranscript?: boolean;
+    compactContext?: boolean;
+    manyDelegates?: boolean;
+    authorizedLeaf?: string;
+  } = {},
 ) {
   if (compactContext) await page.setViewportSize({ width: 393, height: 851 });
   const selectedRun = canonicalTranscript
     ? { ...historicalRun, sessionId: 'historical-session' }
     : historicalRun;
+  const durableManyDelegateGroups = Array.from({ length: 19 }, (_, index) => {
+    const lineageId = `durable-${index}`;
+    const runId = `durable-run-${index}`;
+    const run = {
+      runId,
+      lineageId,
+      name: `Durable delegate ${index}`,
+      kind: 'background',
+      state: index < 5 ? 'running' : 'success',
+      createdAt: index + 1,
+      ...(index < 5 ? { startedAt: index + 1 } : { finishedAt: index + 1 }),
+      allowWrites: false,
+    };
+    return { id: lineageId, ...run, runCount: 1, runs: [run] };
+  });
   const selectedHistory = {
     ...history,
-    groups: [
-      {
-        ...history.groups[0],
-        ...selectedRun,
-        usage: undefined,
-        runs: [selectedRun],
-      },
-    ],
+    groups: manyDelegates
+      ? durableManyDelegateGroups
+      : [
+          {
+            ...history.groups[0],
+            ...selectedRun,
+            usage: undefined,
+            runs: [selectedRun],
+          },
+        ],
   };
   const selectedHistoryDetail = {
     ...historyDetail,
@@ -158,10 +185,11 @@ async function inspectPersistedDelegate(
     const frame = (id: string, data: unknown) =>
       `id: ${id}\ndata: ${JSON.stringify(data)}\n\n`;
     const testWindow = window as typeof window & {
-      emitDashboardEvent(value: { event?: unknown }): void;
+      emitDashboardEvent(value: { cursor?: number; event?: unknown }): void;
     };
     testWindow.emitDashboardEvent = (value) => {
-      const next = ++sequence;
+      const next = value.cursor ?? sequence + 1;
+      sequence = next;
       controller?.enqueue(
         new TextEncoder().encode(
           frame(`session-${next}`, {
@@ -211,32 +239,111 @@ async function inspectPersistedDelegate(
       );
     };
   }, initialSessionSnapshot);
-  await installDashboardBootstrap(page, snapshot);
+  const initialRuntime = manyDelegates
+    ? {
+        runtimeId: 'many-delegate-runtime',
+        ownership: 'managed',
+        pid: 42,
+        cwd: '/tmp',
+        liveState: 'working',
+        online: true,
+        session: { id: 'historical-session', entries: [] },
+        extensionSurfaces: [
+          {
+            id: 'many-live-delegates',
+            rendererId: 'delegate.status',
+            placement: 'main',
+            viewModel: {
+              version: 1,
+              statuses: Array.from({ length: 9 }, (_, index) => ({
+                id: `stale-lineage-${index}`,
+                runId: `stale-run-${index}`,
+                lineageId: `stale-lineage-${index}`,
+                name: `Stale delegate ${index}`,
+                kind: 'background',
+                state: index < 3 ? 'error' : 'success',
+                createdAt: index + 20,
+                finishedAt: index + 20,
+                allowWrites: false,
+              })),
+            },
+          },
+        ],
+      }
+    : undefined;
+  const browserSnapshot = initialRuntime
+    ? { ...snapshot, runtimes: [initialRuntime] }
+    : snapshot;
+  await installDashboardBootstrap(page, browserSnapshot as never);
   await page.route('**/api/usage', (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
-  let historyLeafId = 'leaf-1';
+  let historyLeafId = authorizedLeaf;
   let historyRequests = 0;
+  const returnedHistoryLeaves = new Set<string>();
+  const requestedDetailLeaves: string[] = [];
   await page.route(
     '**/api/sessions/historical-session/delegate-history/runs/run-e2e?*',
-    (route) =>
-      route.fulfill({
+    (route) => {
+      requestedDetailLeaves.push(
+        new URL(route.request().url()).searchParams.get('leafId') ?? '',
+      );
+      return route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify(selectedHistoryDetail),
-      }),
+      });
+    },
   );
   await page.route(
     '**/api/sessions/historical-session/delegate-history',
     (route) => {
       historyRequests += 1;
+      returnedHistoryLeaves.add(historyLeafId);
       return route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify({ ...selectedHistory, leafId: historyLeafId }),
+        body: JSON.stringify({
+          ...selectedHistory,
+          leafId: historyLeafId,
+        }),
       });
     },
   );
 
   await page.goto('/sessions/historical-session');
+  if (manyDelegates) {
+    await page.getByRole('button', { name: 'Open session activity' }).click();
+    const counters = page.getByRole('status', {
+      name: '5 active, 0 waiting, 0 failed, 14 finished',
+    });
+    await expect(counters).toBeVisible();
+    for (let cursor = 1; cursor <= 8; cursor += 1) {
+      await page.evaluate((nextCursor) => {
+        const testWindow = window as typeof window & {
+          emitDashboardEvent(value: unknown): void;
+        };
+        testWindow.emitDashboardEvent({
+          cursor: nextCursor,
+          emittedAt: Date.now(),
+          event: {
+            type: 'session.changed',
+            session: {
+              id: 'historical-session',
+              file: '/tmp/historical-session.jsonl',
+              cwd: '/tmp',
+              leafId: 'leaf-1',
+              entries: [],
+              entriesComplete: true,
+            },
+          },
+        });
+      }, cursor);
+      await expect(counters).toHaveAttribute(
+        'aria-label',
+        '5 active, 0 waiting, 0 failed, 14 finished',
+      );
+    }
+    return;
+  }
   const activity = page.locator('.activity-panel');
   if (!(await activity.isVisible()))
     await page.getByRole('button', { name: 'Open session activity' }).click();
@@ -408,13 +515,18 @@ async function inspectPersistedDelegate(
     page.getByText('Earlier historical transcript entries were omitted'),
   ).toBeVisible();
 
+  if (authorizedLeaf !== 'leaf-1') {
+    expect(returnedHistoryLeaves.has(authorizedLeaf)).toBe(true);
+    expect(requestedDetailLeaves.at(-1)).toBe(authorizedLeaf);
+    return;
+  }
   historyLeafId = 'leaf-2';
   await page.evaluate(() => {
     const testWindow = window as typeof window & {
       emitDashboardEvent(value: unknown): void;
     };
     testWindow.emitDashboardEvent({
-      cursor: 2,
+      cursor: 1,
       emittedAt: Date.now(),
       event: {
         type: 'session.changed',
@@ -430,17 +542,14 @@ async function inspectPersistedDelegate(
     });
   });
   await expect.poll(() => historyRequests).toBeGreaterThan(1);
+  const branchInspector = page.getByRole('dialog', {
+    name: 'Delegate · Offline historical worker',
+  });
+  await expect(branchInspector).toBeVisible();
   await expect(
-    page.getByRole('dialog', {
-      name: 'Delegate · Offline historical worker',
+    branchInspector.getByText('Inspect the historical fixture', {
+      exact: true,
     }),
-  ).toBeVisible();
-  await expect(
-    page
-      .getByRole('dialog', {
-        name: 'Delegate · Offline historical worker',
-      })
-      .getByText('Inspect the historical fixture', { exact: true }),
   ).toBeVisible();
 }
 
@@ -455,3 +564,27 @@ test('shows and inspects a persisted delegate in an offline session @desktop', a
 test('keeps delegate jump-to-latest fixed to the transcript viewport @desktop', async ({
   page,
 }) => inspectPersistedDelegate(page, { canonicalTranscript: true }));
+
+test('keeps many-delegate counts stable against stale live terminals', async ({
+  page,
+}) => inspectPersistedDelegate(page, { manyDelegates: true }));
+
+test('keeps many-delegate counts stable against stale live terminals @desktop', async ({
+  page,
+}) => inspectPersistedDelegate(page, { manyDelegates: true }));
+
+test('authorizes delegate detail against its current branch leaf', async ({
+  page,
+}) =>
+  inspectPersistedDelegate(page, {
+    authorizedLeaf: 'leaf-2',
+    compactContext: true,
+  }));
+
+test('authorizes delegate detail against its current branch leaf @desktop', async ({
+  page,
+}) =>
+  inspectPersistedDelegate(page, {
+    authorizedLeaf: 'leaf-2',
+    compactContext: true,
+  }));

@@ -347,6 +347,61 @@ describe('delegate history composition', () => {
     ).toHaveLength(1);
   });
 
+  it('keeps durable membership stable across stale terminal live snapshots', () => {
+    const durable = {
+      ...history,
+      groups: Array.from({ length: 19 }, (_, index) => {
+        const lineageId = `durable-${index}`;
+        const runId = `durable-run-${index}`;
+        const run = {
+          runId,
+          lineageId,
+          name: `Durable ${index}`,
+          kind: 'background' as const,
+          state: index < 5 ? ('running' as const) : ('success' as const),
+          createdAt: index,
+          allowWrites: false,
+        };
+        return {
+          ...run,
+          id: lineageId,
+          runCount: 1,
+          runs: [run],
+        };
+      }),
+    } as unknown as DelegateHistoryResponse;
+    const staleRows = Array.from({ length: 9 }, (_, index) => ({
+      ...liveRun3,
+      id: `stale-lineage-${index}`,
+      runId: `stale-run-${index}`,
+      lineageId: `stale-lineage-${index}`,
+      state: index < 3 ? ('error' as const) : ('success' as const),
+    }));
+    for (const snapshot of [staleRows, [...staleRows].reverse(), staleRows]) {
+      expect(composeDelegateHistory(durable, snapshot).groups).toHaveLength(19);
+    }
+    expect(
+      composeDelegateHistory(durable, [
+        ...staleRows,
+        { ...liveRun3, id: 'new-active', lineageId: 'new-active' },
+      ]).groups,
+    ).toHaveLength(20);
+  });
+
+  it('keeps an unmatched just-settled live row only while durable catchup is pending', () => {
+    const settling = {
+      ...liveRun3,
+      runId: 'fresh-run',
+      lineageId: 'fresh-lineage',
+      state: 'success' as const,
+    };
+    expect(composeDelegateHistory(history, [settling]).groups).toHaveLength(1);
+    expect(
+      composeDelegateHistory(history, [settling], [], new Set(['fresh-run']))
+        .groups,
+    ).toHaveLength(2);
+  });
+
   it('suppresses standalone wake groups and annotates their single real reference', () => {
     const model = composeDelegateHistory(
       {

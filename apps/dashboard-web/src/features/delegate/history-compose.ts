@@ -603,6 +603,7 @@ export function composeDelegateHistory(
   liveWakes: readonly NonNullable<
     DelegateStatusViewModel['wakes']
   >[number][] = [],
+  settlingRunIds: ReadonlySet<string> = new Set(),
 ): DelegateCompositeModel {
   const durableWakes = (history?.groups ?? [])
     .filter((group) => isWakeGroup(group))
@@ -652,8 +653,14 @@ export function composeDelegateHistory(
     groups.push(annotateWake(groupModel(group, live), wakes));
     if (live) liveByLineage.delete(live.lineageId);
   }
-  for (const live of liveByLineage.values())
+  for (const live of liveByLineage.values()) {
+    if (
+      !isActiveDelegateStatus(live) &&
+      !settlingRunIds.has(delegateSettlementKey(live))
+    )
+      continue;
     groups.push(annotateWake(liveOnlyGroup(live), wakes));
+  }
   const sections = (
     [
       ['active', 'Active'],

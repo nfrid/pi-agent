@@ -27,6 +27,7 @@ import {
   createDelegateHistoryRefreshCoordinator,
   DelegateTranscript,
   dashboardSurfacePlacement,
+  delegateHistoryPendingRunIds,
   delegateHistoryRevisionChanged,
   ExtensionSurfaceStack,
   reconcileDelegateLiveRuns,
@@ -170,6 +171,16 @@ describe('live extension surface fixtures', () => {
     expect(markup).toContain('Legacy bounded output');
   });
 
+  it('does not carry pending settlements across session changes', () => {
+    const pending = { sessionId: 'session-1', runIds: new Set(['run-1']) };
+    expect(delegateHistoryPendingRunIds(pending, 'session-1')).toEqual(
+      new Set(['run-1']),
+    );
+    expect(delegateHistoryPendingRunIds(pending, 'session-2')).toEqual(
+      new Set(),
+    );
+  });
+
   it('refreshes delegate history only for revisions of the mounted session', () => {
     expect(
       delegateHistoryRevisionChanged(undefined, {
@@ -212,7 +223,40 @@ describe('live extension surface fixtures', () => {
     ).toBeUndefined();
   });
 
-  it('retries unsettled durable history with a bounded fake-timer policy', () => {
+  it('coalesces revisions during an in-flight summary refresh without starvation', async () => {
+    vi.useFakeTimers();
+    try {
+      let finishFirst!: () => void;
+      const refresh = vi
+        .fn<() => Promise<void>>()
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              finishFirst = resolve;
+            }),
+        )
+        .mockResolvedValue(undefined);
+      const coordinator = createDelegateHistoryRefreshCoordinator(refresh, {
+        revisionDelayMs: 100,
+      });
+      coordinator.refresh();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(refresh).toHaveBeenCalledTimes(1);
+      for (let index = 0; index < 5; index += 1) {
+        coordinator.refreshRevision();
+        await vi.advanceTimersByTimeAsync(50);
+      }
+      expect(refresh).toHaveBeenCalledTimes(1);
+      finishFirst();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(refresh).toHaveBeenCalledTimes(2);
+      coordinator.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries unsettled durable history with a bounded fake-timer policy', async () => {
     vi.useFakeTimers();
     try {
       const refresh = vi.fn();
@@ -221,15 +265,16 @@ describe('live extension surface fixtures', () => {
         retryDelayMs: 100,
       });
       coordinator.markSettled(['run-1']);
+      await vi.advanceTimersByTimeAsync(0);
       expect(refresh).toHaveBeenCalledTimes(1);
-      vi.advanceTimersByTime(100);
+      await vi.advanceTimersByTimeAsync(100);
       expect(refresh).toHaveBeenCalledTimes(2);
-      vi.advanceTimersByTime(100);
+      await vi.advanceTimersByTimeAsync(100);
       expect(refresh).toHaveBeenCalledTimes(3);
-      vi.advanceTimersByTime(100);
+      await vi.advanceTimersByTimeAsync(100);
       expect(refresh).toHaveBeenCalledTimes(3);
       coordinator.observe(new Set(['run-1']));
-      vi.advanceTimersByTime(1_000);
+      await vi.advanceTimersByTimeAsync(1_000);
       expect(refresh).toHaveBeenCalledTimes(3);
       coordinator.dispose();
     } finally {
@@ -305,6 +350,7 @@ describe('live extension surface fixtures', () => {
         ownerMatches: true,
         fetching: false,
         persistedRunExists: true,
+        durableTerminal: true,
         liveActive: false,
       }),
     ).toBe(true);
@@ -314,6 +360,17 @@ describe('live extension surface fixtures', () => {
         ownerMatches: true,
         fetching: false,
         persistedRunExists: true,
+        durableTerminal: false,
+        liveActive: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldPromoteDelegateDetailSelection({
+        shouldFetch: false,
+        ownerMatches: true,
+        fetching: false,
+        persistedRunExists: true,
+        durableTerminal: true,
         liveActive: true,
       }),
     ).toBe(false);

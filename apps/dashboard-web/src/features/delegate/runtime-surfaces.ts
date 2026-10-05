@@ -139,6 +139,7 @@ export function shouldPromoteDelegateDetailSelection(options: {
   ownerMatches: boolean;
   fetching: boolean;
   persistedRunExists: boolean;
+  durableTerminal: boolean;
   liveActive: boolean;
 }): boolean {
   return (
@@ -146,6 +147,7 @@ export function shouldPromoteDelegateDetailSelection(options: {
     options.ownerMatches &&
     !options.fetching &&
     options.persistedRunExists &&
+    options.durableTerminal &&
     !options.liveActive
   );
 }

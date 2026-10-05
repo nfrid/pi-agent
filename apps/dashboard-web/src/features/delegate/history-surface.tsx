@@ -19,6 +19,7 @@ import {
 } from './history-compose';
 import {
   createDelegateHistoryRefreshCoordinator,
+  delegateHistoryPendingRunIds,
   delegateHistoryRevisionChanged,
 } from './history-refresh';
 import {
@@ -30,6 +31,26 @@ import {
   shouldFetchDelegateDetail,
   shouldPromoteDelegateDetailSelection,
 } from './runtime-surfaces';
+import { delegateSettlementKey } from './settlement-key';
+
+type DelegateDetailSelection = {
+  sessionId: string;
+  lineageId: string;
+  runId: string;
+  liveRunId: string;
+  settlementKey: string;
+  leafId?: string;
+  shouldFetch: boolean;
+};
+
+export function promoteDelegateDetailSelection(
+  selection: DelegateDetailSelection,
+  leafId: string | undefined,
+): DelegateDetailSelection {
+  return selection.shouldFetch
+    ? selection
+    : { ...selection, leafId, shouldFetch: true };
+}
 
 export function DelegateHistorySurface({
   id,
@@ -56,13 +77,8 @@ export function DelegateHistorySurface({
   );
   const live = delegateSurface(runtime);
   const liveRows = live?.model.statuses ?? [];
-  const [detailSelection, setDetailSelection] = useState<{
-    sessionId: string;
-    lineageId: string;
-    runId: string;
-    liveRunId: string;
-    shouldFetch: boolean;
-  }>();
+  const [detailSelection, setDetailSelection] =
+    useState<DelegateDetailSelection>();
   const summaryLeafId = historyQuery.data?.leafId;
   const selectionOwnerMatches = detailSelection?.sessionId === id;
   const selectedLiveRunExists = Boolean(
@@ -86,19 +102,17 @@ export function DelegateHistorySurface({
       ),
   );
   const selectedRunExists = selectedLiveRunExists || selectedPersistedRunExists;
-  // React Query retains the previous summary while a scoped refresh is in
-  // flight. Do not let that previous leaf authorize a detail request or an
-  // inspector payload while its replacement is being fetched.
+  // Keep detail authorized by the summary leaf that was current when the run
+  // was selected. Transcript revisions can change the summary leaf without
+  // changing that run's durable membership or its detail payload.
   const currentDetailSelection =
-    selectionOwnerMatches && selectedRunExists && !historyQuery.isFetching
-      ? detailSelection
-      : undefined;
+    selectionOwnerMatches && selectedRunExists ? detailSelection : undefined;
   const detailOptions = delegateHistoryRunQueryOptions(
     client,
     id,
     currentDetailSelection?.lineageId ?? '',
     currentDetailSelection?.runId ?? '',
-    summaryLeafId,
+    currentDetailSelection?.leafId,
   );
   const detailQuery = useQuery({
     ...detailOptions,
@@ -111,16 +125,32 @@ export function DelegateHistorySurface({
   const previousSessionChange = useRef<
     { id: string; revision: number } | undefined
   >(undefined);
+  const [settlingState, setSettlingState] = useState<{
+    sessionId: string;
+    runIds: ReadonlySet<string>;
+  }>();
+  const settlingRunIds = delegateHistoryPendingRunIds(settlingState, id);
   const refreshCoordinator = useMemo(
     () =>
-      createDelegateHistoryRefreshCoordinator(() => {
-        void queryClient.invalidateQueries({
-          queryKey: dashboardQueryKeys.delegateHistory(id),
-        });
-      }),
+      createDelegateHistoryRefreshCoordinator(
+        () => {
+          const queryKey = dashboardQueryKeys.delegateHistory(id);
+          return queryClient.invalidateQueries(
+            { queryKey },
+            { cancelRefetch: false },
+          );
+        },
+        {
+          onPendingChange: (runIds) =>
+            setSettlingState({ sessionId: id, runIds }),
+        },
+      ),
     [id, queryClient],
   );
   useEffect(() => () => refreshCoordinator.dispose(), [refreshCoordinator]);
+  useEffect(() => {
+    refreshCoordinator.setFetching(historyQuery.isFetching);
+  }, [historyQuery.isFetching, refreshCoordinator]);
   useEffect(() => {
     if (!detailSelection) return;
     // Keep the selected run stable across history-leaf hydration. The current
@@ -136,8 +166,12 @@ export function DelegateHistorySurface({
   }, [detailSelection, historyQuery.isFetching, id, selectedRunExists]);
   useEffect(() => {
     if (!detailSelection) return;
+    const durableTerminal =
+      historySettledRunIds.has(detailSelection.settlementKey) ||
+      historySettledRunIds.has(detailSelection.runId) ||
+      historySettledRunIds.has(detailSelection.liveRunId);
     const liveActive =
-      !historySettledRunIds.has(detailSelection.runId) &&
+      !durableTerminal &&
       liveRows.some(
         (row) =>
           row.runId === detailSelection.liveRunId &&
@@ -152,12 +186,13 @@ export function DelegateHistorySurface({
         ownerMatches: selectionOwnerMatches,
         fetching: historyQuery.isFetching,
         persistedRunExists: selectedPersistedRunExists,
+        durableTerminal,
         liveActive,
       })
     )
       setDetailSelection((current) =>
-        current && !current.shouldFetch
-          ? { ...current, shouldFetch: true }
+        current
+          ? promoteDelegateDetailSelection(current, summaryLeafId)
           : current,
       );
   }, [
@@ -167,22 +202,15 @@ export function DelegateHistorySurface({
     liveRows,
     selectedPersistedRunExists,
     selectionOwnerMatches,
+    summaryLeafId,
   ]);
   useEffect(() => {
     const previous = previousSessionChange.current;
     const current = { id, revision: sessionChange };
     previousSessionChange.current = current;
     if (!delegateHistoryRevisionChanged(previous, current)) return;
-    void queryClient.invalidateQueries({
-      queryKey: dashboardQueryKeys.delegateHistory(id),
-    });
-    // A branch/session revision changes the durable authority for both the
-    // summary and any selected-run payload. Settlement polling intentionally
-    // invalidates only the summary key below, so cached details survive it.
-    void queryClient.invalidateQueries({
-      queryKey: dashboardQueryKeys.delegateHistoryDetail(id),
-    });
-  }, [id, queryClient, sessionChange]);
+    refreshCoordinator.refreshRevision();
+  }, [id, refreshCoordinator, sessionChange]);
   useEffect(() => {
     if (previousSessionId.current !== id) {
       previousStates.current = new Map();
@@ -228,6 +256,7 @@ export function DelegateHistorySurface({
       surface={renderedSurface}
       pausedAt={runtimePauseStatus(runtime)?.pausedAt}
       history={historyQuery.data}
+      settlingRunIds={settlingRunIds}
       historyLoading={historyLoading}
       historyError={historyError ? historyQuery.error : undefined}
       store={store}
@@ -239,6 +268,8 @@ export function DelegateHistorySurface({
           lineageId: run.row.lineageId,
           runId: run.id,
           liveRunId: run.row.runId,
+          settlementKey: delegateSettlementKey(run.row),
+          leafId: summaryLeafId,
           shouldFetch: shouldFetchDelegateDetail(run),
         });
       }}
