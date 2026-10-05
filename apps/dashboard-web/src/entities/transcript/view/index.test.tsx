@@ -25,7 +25,7 @@ vi.mock('../work-log', () => ({
       aria-busy={loading || undefined}
       onClick={onToggle}
     >
-      Work log
+      Worked for
     </button>
   ),
 }));

@@ -26,7 +26,7 @@ export function TranscriptWorkLog({
         onClick={onToggle}
       >
         <TranscriptDisclosureIcon expanded={expanded} />
-        <span>Work log</span>
+        <span>Worked for</span>
         <small>
           {toolStreamDurationLabel(durationMs)}
           {actionCount === undefined

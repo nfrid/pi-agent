@@ -285,7 +285,7 @@ test('an incomplete work log fetches only through its request when opened', asyn
   });
   await page.goto('/sessions/session-1');
   const transcript = page.getByLabel('Transcript', { exact: true });
-  const workLog = transcript.getByRole('button', { name: /Work log/ });
+  const workLog = transcript.getByRole('button', { name: /Worked for/ });
   await expect(workLog).toBeVisible();
   await expect(workLog).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByText('Work item 0', { exact: true })).toHaveCount(0);
@@ -311,7 +311,7 @@ test('closing a partial work log during history loading prevents a late open', a
   await page.goto('/sessions/session-1');
   const workLog = page
     .getByLabel('Transcript', { exact: true })
-    .getByRole('button', { name: /Work log/ });
+    .getByRole('button', { name: /Worked for/ });
   await expect(workLog).toBeVisible();
   await workLog.click();
   await firstPageRequested;
@@ -338,7 +338,7 @@ test('a failed partial work-log load clears its pending disclosure state', async
   await page.goto('/sessions/session-1');
   const workLog = page
     .getByLabel('Transcript', { exact: true })
-    .getByRole('button', { name: /Work log/ });
+    .getByRole('button', { name: /Worked for/ });
   await expect(workLog).toBeVisible();
   await workLog.click();
   await firstPageRequested;
@@ -436,7 +436,7 @@ test('virtualized outline jumps open the containing work log and keep its anchor
   });
   await routeLegacySessionReads(page);
   await page.goto('/sessions/session-1');
-  const workLog = page.getByRole('button', { name: /Work log/ });
+  const workLog = page.getByRole('button', { name: /Worked for/ });
   await expect(workLog).toBeVisible();
   await expect(page.getByText('Long task complete')).toBeVisible();
   await page.getByRole('button', { name: /Redirect this step/ }).click();
@@ -518,7 +518,7 @@ for (const project of ['mobile', 'desktop']) {
     });
     await routeLegacySessionReads(page);
     await page.goto('/sessions/session-1');
-    await page.getByRole('button', { name: /Work log.*2 actions/ }).click();
+    await page.getByRole('button', { name: /Worked for.*2 actions/ }).click();
     const transcript = page.getByLabel('Transcript', { exact: true });
     const calls = transcript.locator('details.tool-detail');
     await expect(calls).toHaveCount(3);
@@ -566,7 +566,7 @@ for (const project of ['mobile', 'desktop']) {
     await expect(transcript.getByText('Inspect this')).toBeVisible();
     await expect(transcript.getByText('Here is the result')).toBeVisible();
     await expect(transcript.getByText('Working now')).toHaveCount(0);
-    const workLog = page.getByRole('button', { name: /Work log.*1m 30s/ });
+    const workLog = page.getByRole('button', { name: /Worked for.*1m 30s/ });
     await expect(workLog).toBeVisible();
     await workLog.click();
     await expect(transcript.getByText('Working now')).toBeVisible();

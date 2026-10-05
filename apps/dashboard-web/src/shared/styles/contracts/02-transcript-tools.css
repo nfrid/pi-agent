@@ -1,7 +1,6 @@
 /* Transcript contract: ordinary messages and compact tool-call streams. */
 .transcript-work-log {
   margin: 6px 0;
-  border-bottom: 1px solid var(--line-soft);
 }
 .transcript-work-log-toggle {
   display: flex;
@@ -19,7 +18,6 @@
   cursor: pointer;
 }
 .transcript-work-log-toggle small {
-  margin-left: auto;
   color: var(--muted);
   font-size: 10px;
 }
