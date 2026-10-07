@@ -879,6 +879,16 @@ test('draft composer completes slash commands before a runtime starts', async ({
   expect(await editor.evaluate(() => window.getSelection()?.anchorOffset)).toBe(
     '/review'.length,
   );
+  const modifier = await editor.evaluate(() =>
+    /Mac|iPhone|iPad/.test(navigator.platform) ? 'Meta' : 'Control',
+  );
+  await editor.pressSequentially(' undo');
+  await expect(editor).toHaveText('/review undo');
+  await editor.press(`${modifier}+z`);
+  await expect(editor).toHaveText('/review');
+  await editor.press(`${modifier}+Shift+z`);
+  await expect(editor).toHaveText('/review undo');
+  await editor.press(`${modifier}+z`);
   await page.getByRole('button', { name: 'Send message' }).click();
   await expect.poll(() => submittedPrompt).toBe('/review');
 });

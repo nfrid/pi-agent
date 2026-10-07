@@ -172,6 +172,19 @@ fenced code
       composer.locator('.cm-link:not(.cm-markup)').first(),
     ).toHaveCSS('color', 'rgb(139, 233, 253)');
 
+    await expect(
+      composer.locator('.cm-emphasis:not(.cm-markup)').first(),
+    ).toHaveCSS('font-style', 'italic');
+    await expect(
+      composer.locator('.cm-strong:not(.cm-markup)').first(),
+    ).toHaveCSS('font-weight', '700');
+    await expect(
+      composer
+        .locator('.cm-line')
+        .filter({ hasText: 'const fenced' })
+        .getByText('const', { exact: true }),
+    ).toHaveCSS('color', 'rgb(189, 147, 249)');
+
     const thinkingColor = await thinking.evaluate(
       (element) => getComputedStyle(element).color,
     );

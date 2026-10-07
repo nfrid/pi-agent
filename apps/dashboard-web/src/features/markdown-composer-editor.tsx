@@ -1,4 +1,9 @@
-import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
+import {
+  defaultKeymap,
+  history,
+  historyKeymap,
+  isolateHistory,
+} from '@codemirror/commands';
 import {
   markdownLanguage,
   markdown as markdownLanguageExtension,
@@ -57,6 +62,14 @@ const markdownHighlightStyle = HighlightStyle.define([
   { tag: tags.monospace, class: 'cm-monospace' },
   { tag: tags.processingInstruction, class: 'cm-markup' },
   { tag: tags.meta, class: 'cm-markup' },
+  { tag: tags.keyword, color: 'var(--purple)' },
+  { tag: tags.string, color: 'var(--green)' },
+  { tag: tags.comment, color: 'var(--muted)', fontStyle: 'italic' },
+  { tag: [tags.number, tags.bool, tags.null], color: 'var(--purple)' },
+  {
+    tag: [tags.function(tags.variableName), tags.tagName],
+    color: 'var(--cyan)',
+  },
 ]);
 
 const editorTheme = EditorView.theme({
@@ -113,6 +126,7 @@ export default function MarkdownComposerEditor({
   const anchorRef = useRef<CompletionAnchor | undefined>(undefined);
   const markdownRef = useRef(markdown);
   const readOnlyCompartment = useMemo(() => new Compartment(), []);
+  const placeholderCompartment = useMemo(() => new Compartment(), []);
   const listId = useId();
   const [anchor, setAnchor] = useState<CompletionAnchor>();
   const [files, setFiles] = useState<readonly ComposerFileSuggestion[]>([]);
@@ -164,7 +178,7 @@ export default function MarkdownComposerEditor({
           }),
           syntaxHighlighting(markdownHighlightStyle),
           editorTheme,
-          editorPlaceholder(placeholder),
+          placeholderCompartment.of(editorPlaceholder('')),
           EditorView.lineWrapping,
           EditorView.editorAttributes.of({
             class: 'composer-rich-editor-root',
@@ -203,7 +217,15 @@ export default function MarkdownComposerEditor({
       view.destroy();
       viewRef.current = null;
     };
-  }, [placeholder, publishAnchor, readOnlyCompartment]);
+  }, [placeholderCompartment, publishAnchor, readOnlyCompartment]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({
+      effects: placeholderCompartment.reconfigure(
+        editorPlaceholder(placeholder),
+      ),
+    });
+  }, [placeholder, placeholderCompartment]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -281,6 +303,7 @@ export default function MarkdownComposerEditor({
         anchor: currentAnchor.from + suggestion.value.length,
       },
       userEvent: 'input.complete',
+      annotations: isolateHistory.of('full'),
     });
     setDismissedKey(
       `${currentAnchor.from}:${currentAnchor.from + suggestion.value.length}:${suggestion.value}`,
@@ -291,7 +314,6 @@ export default function MarkdownComposerEditor({
   return (
     <div
       className="composer-editor-mount"
-      ref={hostRef}
       onKeyDownCapture={(event) => {
         if (!suggestions.length) return;
         if (event.key === 'ArrowDown') {
@@ -328,6 +350,7 @@ export default function MarkdownComposerEditor({
         }
       }}
     >
+      <div ref={hostRef} />
       <ComposerAutocomplete
         id={listId}
         suggestions={suggestions}
