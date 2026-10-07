@@ -773,6 +773,14 @@ test('draft composer completes slash commands before a runtime starts', async ({
 }) => {
   await page.addInitScript(() => {
     localStorage.setItem(
+      'pi-dashboard-composer-draft:draft-autocomplete',
+      JSON.stringify({
+        version: 1,
+        text: '# Rehydrated source\n\n```unknown-language\n<b>literal</b>\n```',
+        revision: 'rehydrated',
+      }),
+    );
+    localStorage.setItem(
       'pi-dashboard-drafts:v1',
       JSON.stringify([
         {
@@ -855,6 +863,15 @@ test('draft composer completes slash commands before a runtime starts', async ({
   await page.goto('/drafts/draft-autocomplete');
   const editor = page.getByRole('textbox', { name: 'Message Pi' });
   await expect(editor).toBeVisible();
+  await expect
+    .poll(() =>
+      editor.evaluate((element) =>
+        Array.from(element.querySelectorAll('.cm-line'))
+          .map((line) => line.textContent ?? '')
+          .join('\n'),
+      ),
+    )
+    .toBe('# Rehydrated source\n\n```unknown-language\n<b>literal</b>\n```');
   await editor.fill('/rev');
   await expect(page.getByRole('option', { name: /\/review/ })).toBeVisible();
   await editor.press('Tab');
@@ -7083,9 +7100,8 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await expect(fileOption).not.toContainText('FILE');
   await composerInput.press('Tab');
   await expect(composerInput).toContainText('foo @src/file.js bar');
-  expect(
-    await composerInput.evaluate(() => window.getSelection()?.anchorOffset),
-  ).toBe('foo @src/file.js'.length);
+  await composerInput.pressSequentially('!');
+  await expect(composerInput).toContainText('foo @src/file.js! bar');
   await composerInput.fill('');
   const initialComposerHeight = await composerInput.evaluate(
     (element) => element.getBoundingClientRect().height,
@@ -7108,24 +7124,54 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   expect(cappedComposer.height).toBeLessThanOrEqual(180);
   expect(cappedComposer.scrollHeight).toBeGreaterThan(cappedComposer.height);
   await composerInput.fill('');
-  await composerInput.pressSequentially('# ');
-  await composerInput.pressSequentially('Live markdown heading');
-  await expect(
-    page
-      .locator('.composer-rich-editor')
-      .getByRole('heading', { name: 'Live markdown heading' }),
-  ).toBeVisible();
+  await composerInput.fill('# Live markdown heading');
+  await expect(composerInput).toHaveText('# Live markdown heading');
+  await expect(composerInput.locator('.cm-heading1:not(.cm-markup)')).toHaveCSS(
+    'color',
+    'rgb(255, 121, 198)',
+  );
   await expect(
     page.getByRole('button', { name: 'Preview', exact: true }),
   ).toHaveCount(0);
   await scrollTranscript(page, 0);
   await expect.poll(() => transcriptGap(page)).toBeGreaterThan(120);
-  await composerInput.fill('stream this');
-  await page.getByRole('button', { name: 'Send' }).click();
-  await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(1);
+  await composerInput.evaluate((content) => {
+    const clipboard = new DataTransfer();
+    clipboard.setData('text/html', '<p><strong>formatted HTML</strong></p>');
+    clipboard.setData('text/plain', '**literal Markdown** <b>literal HTML</b>');
+    content.dispatchEvent(
+      new ClipboardEvent('paste', {
+        clipboardData: clipboard,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+  await expect(composerInput).toContainText(
+    '**literal Markdown** <b>literal HTML</b>',
+  );
+  const rawMessage = `# **Raw Markdown**
+
+<<Component broken={}>
+<b>raw HTML</b>
+
+\`\`\`unknown-language
+const raw = true;
+\`\`\``;
+  await composerInput.fill(rawMessage);
   await expect
-    .poll(() => mocks.commands.some((command) => command.type === 'prompt'))
-    .toBe(true);
+    .poll(() =>
+      composerInput.evaluate((element) =>
+        Array.from(element.querySelectorAll('.cm-line'))
+          .map((line) => line.textContent ?? '')
+          .join('\n'),
+      ),
+    )
+    .toBe(rawMessage);
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect
+    .poll(() => mocks.commands.findLast((command) => command.type === 'prompt'))
+    .toMatchObject({ text: rawMessage });
   await page.getByLabel('Choose images').setInputFiles({
     name: 'phase6.png',
     mimeType: 'image/png',

@@ -14,7 +14,11 @@ const composerMarkdown = `# Heading one
 
 | Header | Value |
 | --- | --- |
-| row | cell |`;
+| row | cell |
+
+\`\`\`javascript
+const fenced = true;
+\`\`\``;
 
 const snapshot = {
   serverId: 'markdown-colors-test',
@@ -139,39 +143,34 @@ fenced code
       'rgb(139, 233, 253)',
     );
 
-    const composer = page.locator('.composer-rich-editor');
+    const composer = page.getByRole('textbox', { name: 'Message Pi' });
     await expect(composer).toBeVisible();
+    await expect
+      .poll(() =>
+        composer.evaluate((element) =>
+          Array.from(element.querySelectorAll('.cm-line'))
+            .map((line) => line.textContent ?? '')
+            .join('\n'),
+        ),
+      )
+      .toBe(composerMarkdown);
     for (const [index, color] of expectedHeadingColors.entries()) {
-      await expect(composer.locator(`h${index + 1}`)).toHaveCSS('color', color);
+      await expect(
+        composer.locator(`.cm-heading${index + 1}:not(.cm-markup)`).first(),
+      ).toHaveCSS('color', color);
     }
-    await expect(composer.locator('em')).toHaveCSS(
-      'color',
-      'rgb(241, 250, 140)',
-    );
-    await expect(composer.locator('strong')).toHaveCSS(
-      'color',
-      'rgb(255, 184, 108)',
-    );
-    await expect(composer.locator('code')).toHaveCSS(
-      'color',
-      'rgb(80, 250, 123)',
-    );
-    await expect(composer.locator('a')).toHaveCSS(
-      'color',
-      'rgb(139, 233, 253)',
-    );
-    await expect(composer.locator('blockquote')).toHaveCSS(
-      'border-left-color',
-      'rgb(139, 233, 253)',
-    );
-    await expect(composer.locator('blockquote')).toHaveCSS(
-      'color',
-      'rgb(165, 173, 210)',
-    );
-    await expect(composer.locator('th').first()).toHaveCSS(
-      'color',
-      'rgb(139, 233, 253)',
-    );
+    await expect(
+      composer.locator('.cm-emphasis:not(.cm-markup)').first(),
+    ).toHaveCSS('color', 'rgb(241, 250, 140)');
+    await expect(
+      composer.locator('.cm-strong:not(.cm-markup)').first(),
+    ).toHaveCSS('color', 'rgb(255, 184, 108)');
+    await expect(
+      composer.locator('.cm-monospace:not(.cm-markup)').first(),
+    ).toHaveCSS('color', 'rgb(80, 250, 123)');
+    await expect(
+      composer.locator('.cm-link:not(.cm-markup)').first(),
+    ).toHaveCSS('color', 'rgb(139, 233, 253)');
 
     const thinkingColor = await thinking.evaluate(
       (element) => getComputedStyle(element).color,

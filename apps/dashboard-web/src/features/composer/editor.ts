@@ -1,5 +1,1 @@
-import { lazy } from 'react';
-
-export const MarkdownComposerEditor = lazy(
-  () => import('../markdown-composer-editor'),
-);
+export { default as MarkdownComposerEditor } from '../markdown-composer-editor';

@@ -106,8 +106,7 @@
   border-top: 1px solid var(--line);
 }
 
-/* Applied to both react-markdown and MDXEditor content. Keep this class
-   color-only so editor geometry remains owned by the composer contract. */
+/* Transcript Markdown theme colors. */
 .markdownColors h1 {
   color: var(--pink);
 }

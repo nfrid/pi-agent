@@ -1,27 +1,19 @@
+import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import {
-  codeBlockPlugin,
-  headingsPlugin,
-  linkPlugin,
-  listsPlugin,
-  MDXEditor,
-  type MDXEditorMethods,
-  markdownShortcutPlugin,
-  quotePlugin,
-  realmPlugin,
-  rootEditor$,
-  tablePlugin,
-  thematicBreakPlugin,
-} from '@mdxeditor/editor';
-import '@mdxeditor/editor/style.css';
+  markdownLanguage,
+  markdown as markdownLanguageExtension,
+} from '@codemirror/lang-markdown';
+import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { languages } from '@codemirror/language-data';
+import { Compartment, EditorState } from '@codemirror/state';
+import {
+  EditorView,
+  placeholder as editorPlaceholder,
+  keymap,
+} from '@codemirror/view';
+import { tags } from '@lezer/highlight';
 import { dashboardHttpClient } from '@pi-dashboard/client';
 import type { ComposerFileSuggestion } from '@pi-dashboard/protocol';
-import {
-  $getNodeByKey,
-  $getSelection,
-  $isRangeSelection,
-  $isTextNode,
-  type LexicalEditor,
-} from 'lexical';
 import {
   useCallback,
   useEffect,
@@ -30,7 +22,6 @@ import {
   useRef,
   useState,
 } from 'react';
-import styles from '../entities/transcript/markdown.module.css';
 import {
   ComposerAutocomplete,
   type ComposerCommandOption,
@@ -41,16 +32,7 @@ import {
   composerFileSuggestionOptions,
 } from './composer-autocomplete';
 
-const editorBridgePlugin = realmPlugin<{
-  onEditor: (editor: LexicalEditor) => void;
-}>({
-  postInit(realm, params) {
-    const editor = realm.getValue(rootEditor$);
-    if (editor && params) params.onEditor(editor);
-  },
-});
-
-type CompletionAnchor = ComposerCompletionToken & { nodeKey: string };
+type CompletionAnchor = ComposerCompletionToken & { from: number; to: number };
 
 type MarkdownComposerEditorProps = {
   commands?: readonly ComposerCommandOption[];
@@ -61,28 +43,59 @@ type MarkdownComposerEditorProps = {
   readOnly: boolean;
 };
 
-function completionAnchor(editor: LexicalEditor): CompletionAnchor | undefined {
-  return editor.getEditorState().read(() => {
-    const selection = $getSelection();
-    if (
-      !$isRangeSelection(selection) ||
-      !selection.isCollapsed() ||
-      selection.anchor.type !== 'text'
-    )
-      return undefined;
-    const node = selection.anchor.getNode();
-    if (!$isTextNode(node)) return undefined;
-    const token = composerCompletionToken(
-      node.getTextContent(),
-      selection.anchor.offset,
-    );
-    return token ? { ...token, nodeKey: node.getKey() } : undefined;
-  });
-}
+const markdownHighlightStyle = HighlightStyle.define([
+  { tag: tags.heading1, class: 'cm-heading1' },
+  { tag: tags.heading2, class: 'cm-heading2' },
+  { tag: tags.heading3, class: 'cm-heading3' },
+  { tag: tags.heading4, class: 'cm-heading4' },
+  { tag: tags.heading5, class: 'cm-heading5' },
+  { tag: tags.heading6, class: 'cm-heading6' },
+  { tag: tags.emphasis, class: 'cm-emphasis' },
+  { tag: tags.strong, class: 'cm-strong' },
+  { tag: tags.link, class: 'cm-link' },
+  { tag: tags.url, class: 'cm-url' },
+  { tag: tags.monospace, class: 'cm-monospace' },
+  { tag: tags.processingInstruction, class: 'cm-markup' },
+  { tag: tags.meta, class: 'cm-markup' },
+]);
+
+const editorTheme = EditorView.theme({
+  '&': { height: '100%', backgroundColor: 'transparent', color: 'var(--fg)' },
+  '.cm-scroller': {
+    maxHeight: '180px',
+    overflow: 'auto',
+    fontFamily: 'inherit',
+  },
+  '.cm-placeholder': { color: 'var(--muted)' },
+  '.cm-content': {
+    maxHeight: '180px',
+    overflowY: 'auto',
+    padding: '10px 8px 8px',
+    caretColor: 'var(--fg)',
+  },
+  '.cm-line': { lineHeight: '1.55' },
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--fg)' },
+  '&.cm-focused': { outline: 'none' },
+  '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': {
+    backgroundColor: 'var(--selection, #ffffff2b)',
+  },
+});
 
 function anchorKey(anchor: CompletionAnchor | undefined): string | undefined {
-  return anchor
-    ? `${anchor.nodeKey}:${anchor.start}:${anchor.end}:${anchor.prefix}`
+  return anchor ? `${anchor.from}:${anchor.to}:${anchor.prefix}` : undefined;
+}
+
+function completionAnchor(state: EditorState): CompletionAnchor | undefined {
+  if (!state.selection.main.empty) return undefined;
+  const cursor = state.selection.main.head;
+  const line = state.doc.lineAt(cursor);
+  const token = composerCompletionToken(line.text, cursor - line.from);
+  return token
+    ? {
+        ...token,
+        from: line.from + token.start,
+        to: line.from + token.end,
+      }
     : undefined;
 }
 
@@ -95,20 +108,20 @@ export default function MarkdownComposerEditor({
   readOnly,
 }: MarkdownComposerEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
-  const editorRef = useRef<MDXEditorMethods | null>(null);
-  useEffect(() => {
-    const editor = editorRef.current;
-    if (editor && editor.getMarkdown() !== markdown)
-      editor.setMarkdown(markdown);
-  }, [markdown]);
-  const lexicalEditorRef = useRef<LexicalEditor | null>(null);
-  const listenerCleanupRef = useRef<() => void>(() => undefined);
+  const viewRef = useRef<EditorView | null>(null);
+  const onChangeRef = useRef(onChange);
   const anchorRef = useRef<CompletionAnchor | undefined>(undefined);
+  const markdownRef = useRef(markdown);
+  const readOnlyCompartment = useMemo(() => new Compartment(), []);
   const listId = useId();
   const [anchor, setAnchor] = useState<CompletionAnchor>();
   const [files, setFiles] = useState<readonly ComposerFileSuggestion[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [dismissedKey, setDismissedKey] = useState<string>();
+
+  onChangeRef.current = onChange;
+  markdownRef.current = markdown;
+
   const commandSuggestions = useMemo(
     () => composerCommandSuggestions(commands, anchor),
     [anchor, commands],
@@ -126,40 +139,113 @@ export default function MarkdownComposerEditor({
   const boundedIndex = suggestions.length
     ? Math.min(selectedIndex, suggestions.length - 1)
     : 0;
-  const connectLexicalEditor = useCallback((editor: LexicalEditor) => {
-    listenerCleanupRef.current();
-    lexicalEditorRef.current = editor;
-    const publishAnchor = () => {
-      const next = completionAnchor(editor);
-      if (anchorKey(anchorRef.current) === anchorKey(next)) return;
-      anchorRef.current = next;
-      setAnchor(next);
-      setSelectedIndex(0);
-      setDismissedKey(undefined);
-    };
-    publishAnchor();
-    listenerCleanupRef.current = editor.registerUpdateListener(publishAnchor);
-  }, []);
-  const bridge = useMemo(
-    () => editorBridgePlugin({ onEditor: connectLexicalEditor }),
-    [connectLexicalEditor],
-  );
-  const plugins = useMemo(
-    () => [
-      headingsPlugin(),
-      listsPlugin(),
-      quotePlugin(),
-      thematicBreakPlugin(),
-      linkPlugin(),
-      tablePlugin(),
-      codeBlockPlugin({ defaultCodeBlockLanguage: '' }),
-      markdownShortcutPlugin(),
-      bridge,
-    ],
-    [bridge],
-  );
 
-  useEffect(() => () => listenerCleanupRef.current(), []);
+  const publishAnchor = useCallback((next: CompletionAnchor | undefined) => {
+    if (anchorKey(anchorRef.current) === anchorKey(next)) return;
+    anchorRef.current = next;
+    setAnchor(next);
+    setSelectedIndex(0);
+    setDismissedKey(undefined);
+  }, []);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const view = new EditorView({
+      parent: host,
+      state: EditorState.create({
+        doc: markdownRef.current,
+        extensions: [
+          markdownLanguageExtension({
+            base: markdownLanguage,
+            codeLanguages: languages,
+            completeHTMLTags: false,
+            pasteURLAsLink: false,
+          }),
+          syntaxHighlighting(markdownHighlightStyle),
+          editorTheme,
+          editorPlaceholder(placeholder),
+          EditorView.lineWrapping,
+          EditorView.editorAttributes.of({
+            class: 'composer-rich-editor-root',
+          }),
+          EditorView.contentAttributes.of({
+            class: 'composer-rich-editor',
+            'aria-label': 'Message Pi',
+            'aria-autocomplete': 'list',
+            'aria-multiline': 'true',
+            role: 'textbox',
+            spellcheck: 'false',
+          }),
+          readOnlyCompartment.of([
+            EditorState.readOnly.of(false),
+            EditorView.editable.of(true),
+          ]),
+          history(),
+          keymap.of([...historyKeymap, ...defaultKeymap]),
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+              const next = update.state.doc.toString();
+              if (next !== markdownRef.current) {
+                markdownRef.current = next;
+                onChangeRef.current(next);
+              }
+            }
+            if (update.selectionSet || update.docChanged)
+              publishAnchor(completionAnchor(update.state));
+          }),
+        ],
+      }),
+    });
+    viewRef.current = view;
+    publishAnchor(completionAnchor(view.state));
+    return () => {
+      view.destroy();
+      viewRef.current = null;
+    };
+  }, [placeholder, publishAnchor, readOnlyCompartment]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const current = view.state.doc.toString();
+    if (current !== markdown) {
+      markdownRef.current = markdown;
+      view.dispatch({
+        changes: { from: 0, to: current.length, insert: markdown },
+        selection: {
+          anchor: Math.min(view.state.selection.main.head, markdown.length),
+        },
+      });
+    }
+  }, [markdown]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (view)
+      view.dispatch({
+        effects: readOnlyCompartment.reconfigure([
+          EditorState.readOnly.of(readOnly),
+          EditorView.editable.of(!readOnly),
+        ]),
+      });
+  }, [readOnly, readOnlyCompartment]);
+
+  useEffect(() => {
+    const content = hostRef.current?.querySelector<HTMLElement>('.cm-content');
+    if (!content) return;
+    content.setAttribute('aria-expanded', String(suggestions.length > 0));
+    if (suggestions.length > 0) {
+      content.setAttribute('aria-controls', listId);
+      content.setAttribute(
+        'aria-activedescendant',
+        `${listId}-option-${boundedIndex}`,
+      );
+    } else {
+      content.removeAttribute('aria-controls');
+      content.removeAttribute('aria-activedescendant');
+    }
+  }, [boundedIndex, listId, suggestions.length]);
 
   useEffect(() => {
     if (!cwd || anchor?.kind !== 'file') {
@@ -181,60 +267,26 @@ export default function MarkdownComposerEditor({
     };
   }, [anchor?.kind, anchor?.query, cwd]);
 
-  const selectSuggestion = useCallback(
-    (suggestion: ComposerSuggestion) => {
-      const editor = lexicalEditorRef.current;
-      if (!editor || !anchor) return;
-      editor.update(() => {
-        const node = $getNodeByKey(anchor.nodeKey);
-        if (!$isTextNode(node)) return;
-        node.select(anchor.start, anchor.end);
-        const selection = $getSelection();
-        if (!$isRangeSelection(selection)) return;
-        selection.insertText(suggestion.value);
-      });
-      setDismissedKey(
-        `${anchor.nodeKey}:${anchor.start}:${anchor.start + suggestion.value.length}:${suggestion.value}`,
-      );
-      requestAnimationFrame(() => editor.focus());
-    },
-    [anchor],
-  );
-
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!host) return;
-    const labelEditor = () => {
-      const editable = host.querySelector<HTMLElement>(
-        '[contenteditable="true"]',
-      );
-      if (!editable) return;
-      editable.setAttribute('aria-label', 'Message Pi');
-      editable.setAttribute('role', 'textbox');
-      editable.setAttribute('aria-multiline', 'true');
-      editable.setAttribute('aria-autocomplete', 'list');
-      editable.setAttribute('aria-expanded', String(suggestions.length > 0));
-      if (suggestions.length > 0) {
-        editable.setAttribute('aria-controls', listId);
-        editable.setAttribute(
-          'aria-activedescendant',
-          `${listId}-option-${boundedIndex}`,
-        );
-      } else {
-        editable.removeAttribute('aria-controls');
-        editable.removeAttribute('aria-activedescendant');
-      }
-    };
-    labelEditor();
-    const observer = new MutationObserver(labelEditor);
-    observer.observe(host, {
-      attributes: true,
-      attributeFilter: ['contenteditable'],
-      childList: true,
-      subtree: true,
+  const selectSuggestion = useCallback((suggestion: ComposerSuggestion) => {
+    const view = viewRef.current;
+    const currentAnchor = anchorRef.current;
+    if (!view || !currentAnchor) return;
+    view.dispatch({
+      changes: {
+        from: currentAnchor.from,
+        to: currentAnchor.to,
+        insert: suggestion.value,
+      },
+      selection: {
+        anchor: currentAnchor.from + suggestion.value.length,
+      },
+      userEvent: 'input.complete',
     });
-    return () => observer.disconnect();
-  }, [boundedIndex, listId, suggestions.length]);
+    setDismissedKey(
+      `${currentAnchor.from}:${currentAnchor.from + suggestion.value.length}:${suggestion.value}`,
+    );
+    requestAnimationFrame(() => view.focus());
+  }, []);
 
   return (
     <div
@@ -276,18 +328,6 @@ export default function MarkdownComposerEditor({
         }
       }}
     >
-      <MDXEditor
-        ref={editorRef}
-        className="composer-rich-editor-root dark-theme"
-        contentEditableClassName={`composer-rich-editor ${styles.markdownColors}`}
-        markdown={markdown}
-        onChange={(next: string, initialMarkdownNormalize: boolean) => {
-          if (!initialMarkdownNormalize) onChange(next);
-        }}
-        placeholder={placeholder}
-        readOnly={readOnly}
-        plugins={plugins}
-      />
       <ComposerAutocomplete
         id={listId}
         suggestions={suggestions}

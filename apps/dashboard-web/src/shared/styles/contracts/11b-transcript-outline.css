@@ -415,8 +415,7 @@ body:has(.session-page) .global-tools > .palette-trigger {
     padding: 6px 7px 5px;
   }
   .session-page > .session-control-layer .composer textarea,
-  .session-page > .session-control-layer .composer .composer-rich-editor,
-  .session-page > .session-control-layer .composer .composer-editor-loading {
+  .session-page > .session-control-layer .composer .composer-rich-editor-root {
     min-height: 42px;
   }
   .session-page > .session-control-layer .composer textarea,

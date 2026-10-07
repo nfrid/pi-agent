@@ -76,68 +76,69 @@
   margin-inline-start: 8px;
   content: "";
 }
-.composer-editor-loading {
-  min-height: 48px;
-  padding: 10px 8px;
-  color: var(--dim);
-  font-size: 11px;
-}
 .composer-rich-editor-root {
   width: 100%;
   min-width: 0;
+  min-height: 48px;
+  max-height: 180px;
+  overflow: hidden;
   background: transparent;
   color: var(--fg);
-  --basePageBg: transparent;
-  --baseBase: var(--bg);
-  --baseBgSubtle: var(--bg-alt);
-  --baseBg: color-mix(in srgb, var(--bg-alt) 88%, var(--bg));
-  --baseLine: var(--line-soft);
-  --baseBorder: var(--line);
-  --baseText: var(--muted);
-  --baseTextContrast: var(--fg);
-  --accentText: var(--cyan);
-  --accentTextContrast: var(--cyan);
+  font-size: 14px;
 }
 .composer-rich-editor {
   box-sizing: border-box;
   min-height: 48px;
-  max-height: 180px;
-  overflow-y: auto;
-  padding: 10px 8px 8px;
   color: var(--fg);
   font-family: inherit;
   font-size: 14px;
-  line-height: 1.55;
 }
-.composer-rich-editor > :first-child {
-  margin-top: 0;
+.composer-rich-editor .cm-heading1:not(.cm-markup) {
+  color: var(--pink);
 }
-.composer-rich-editor > :last-child {
-  margin-bottom: 0;
+.composer-rich-editor .cm-heading2:not(.cm-markup) {
+  color: var(--purple);
 }
-.composer-rich-editor :is(p, ul, ol, blockquote, pre) {
-  margin-top: 0.35em;
-  margin-bottom: 0.35em;
+.composer-rich-editor .cm-heading3:not(.cm-markup) {
+  color: var(--red);
 }
-.composer-rich-editor :is(ul, ol) {
-  padding-left: 1.6em;
+.composer-rich-editor .cm-heading4:not(.cm-markup) {
+  color: var(--green);
 }
-.composer-rich-editor :is(h1, h2, h3, h4, h5, h6) {
-  margin: 0.45em 0 0.25em;
-  font-size: 1em;
-  line-height: 1.3;
+.composer-rich-editor .cm-heading5:not(.cm-markup) {
+  color: var(--cyan);
 }
-.composer-rich-editor blockquote {
-  border-left-style: solid;
-  border-left-width: 2px;
-  padding-left: 8px;
+.composer-rich-editor .cm-heading6:not(.cm-markup) {
+  color: var(--line);
 }
-.composer-rich-editor code {
-  border-radius: 3px;
-  padding: 1px 3px;
+.composer-rich-editor .cm-emphasis:not(.cm-markup) {
+  color: var(--yellow);
+  font-style: italic;
+}
+.composer-rich-editor .cm-strong:not(.cm-markup) {
+  color: var(--orange);
+  font-weight: 700;
+}
+.composer-rich-editor .cm-link:not(.cm-markup),
+.composer-rich-editor .cm-url:not(.cm-markup) {
+  color: var(--cyan);
+}
+.composer-rich-editor .cm-monospace:not(.cm-markup) {
+  color: var(--green);
+}
+.composer-rich-editor .cm-markup {
+  color: var(--muted);
+}
+.new-chat-composer .composer-rich-editor-root {
+  min-height: 74px;
+  max-height: 220px;
 }
 .new-chat-composer .composer-rich-editor {
   min-height: 74px;
+  max-height: 220px;
+}
+.new-chat-composer .cm-scroller,
+.new-chat-composer .composer-rich-editor {
   max-height: 220px;
 }
 .composer-control-row {

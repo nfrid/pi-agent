@@ -4,7 +4,6 @@ import {
   type KeyboardEvent,
   type ReactNode,
   type RefObject,
-  Suspense,
   useLayoutEffect,
   useRef,
 } from 'react';
@@ -161,20 +160,14 @@ export function ComposerShell({
         onPasteCapture={onPasteCapture}
         submissionDisabled={submissionDisabled}
       >
-        <Suspense
-          fallback={
-            <output className="composer-editor-loading">Loading editor…</output>
-          }
-        >
-          <MarkdownComposerEditor
-            markdown={markdown}
-            commands={commands}
-            cwd={cwd}
-            onChange={onChange}
-            placeholder={placeholder}
-            readOnly={readOnly}
-          />
-        </Suspense>
+        <MarkdownComposerEditor
+          markdown={markdown}
+          commands={commands}
+          cwd={cwd}
+          onChange={onChange}
+          placeholder={placeholder}
+          readOnly={readOnly}
+        />
         <div className="composer-actions">
           <AriaButton
             type="button"
