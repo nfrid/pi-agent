@@ -8,7 +8,12 @@ const composerMarkdown = `# Heading one
 ##### Heading five
 ###### Heading six
 
-*emphasis* **strong** \`inline code\` [link](https://example.com)
+*emphasis* **strong** ~~strikethrough~~ \`inline code\` [link](https://example.com)
+
+@src/file $skill
+/command
+
+\`@inline-code\`
 
 > quoted text
 
@@ -18,6 +23,7 @@ const composerMarkdown = `# Heading one
 
 \`\`\`javascript
 const fenced = true;
+@fenced-code
 \`\`\``;
 
 const snapshot = {
@@ -178,6 +184,24 @@ fenced code
     await expect(
       composer.locator('.cm-strong:not(.cm-markup)').first(),
     ).toHaveCSS('font-weight', '700');
+    await expect(
+      composer.locator('.cm-strikethrough:not(.cm-markup)').first(),
+    ).toHaveCSS('text-decoration-line', 'line-through');
+    await expect(composer.locator('.cm-composer-file')).toHaveText('@src/file');
+    await expect(composer.locator('.cm-composer-skill')).toHaveText('$skill');
+    await expect(composer.locator('.cm-composer-command')).toHaveText(
+      '/command',
+    );
+    await expect(composer.locator('.cm-composer-file')).toHaveCount(1);
+    const headingSizes = await Promise.all(
+      Array.from({ length: 6 }, (_, index) =>
+        composer
+          .locator(`.cm-heading${index + 1}:not(.cm-markup)`)
+          .first()
+          .evaluate((element) => getComputedStyle(element).fontSize),
+      ),
+    );
+    expect(new Set(headingSizes).size).toBe(6);
     await expect(
       composer
         .locator('.cm-line')

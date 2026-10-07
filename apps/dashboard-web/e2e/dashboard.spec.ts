@@ -6675,7 +6675,7 @@ for (const desktop of [false, true]) {
   });
 }
 
-test('composer text wraps around top-right actions @desktop', async ({
+test('composer reserves top-right action space on every line @desktop', async ({
   page,
 }) => {
   await installPhase6Mocks(page, {
@@ -6726,9 +6726,8 @@ test('composer text wraps around top-right actions @desktop', async ({
         surfaceWidth: surfaceRect.width,
         mountWidth: mountRect.width,
         actionsLeft: actionsRect.left,
-        firstLineRight: lineBounds[0]?.right ?? 0,
-        laterLineRight: Math.max(
-          ...lineBounds.slice(2).map(({ right }) => right),
+        allLinesBeforeActions: lineBounds.every(
+          ({ right }) => right < actionsRect.left,
         ),
         lineCount: lineBounds.length,
       };
@@ -6736,9 +6735,62 @@ test('composer text wraps around top-right actions @desktop', async ({
 
   expect(Math.abs(geometry.surfaceWidth - geometry.mountWidth)).toBeLessThan(2);
   expect(geometry.lineCount).toBeGreaterThan(3);
-  expect(geometry.firstLineRight).toBeLessThan(geometry.actionsLeft);
-  expect(geometry.laterLineRight).toBeGreaterThan(geometry.actionsLeft);
+  expect(geometry.allLinesBeforeActions).toBe(true);
 });
+
+for (const title of [
+  'composer clicks track visible lines after scrolling',
+  'composer clicks track visible lines after scrolling @desktop',
+]) {
+  test(title, async ({ page }) => {
+    const mocks = await installPhase6Mocks(page);
+    await page.goto('/sessions/s1');
+    const composer = page.getByRole('textbox', { name: 'Message Pi' });
+    const headings = new Map([
+      [2, '#'],
+      [10, '##'],
+      [20, '###'],
+      [30, '####'],
+      [45, '###'],
+    ]);
+    const lines = Array.from({ length: 50 }, (_, index) => {
+      const line = `visible line ${index + 1}`;
+      const heading = headings.get(index + 1);
+      return heading ? `${heading} ${line}` : line;
+    });
+    await composer.fill(lines.join('\n'));
+    const scroller = page.locator('.cm-scroller');
+    const content = page.locator('.cm-content');
+    await expect(scroller).toHaveCSS('overflow-y', 'auto');
+    expect(
+      await content.evaluate((element) => getComputedStyle(element).overflowY),
+    ).toBe('visible');
+
+    await composer.getByText('# visible line 2', { exact: true }).click();
+    await composer.press('End');
+    await composer.pressSequentially(' edited at top');
+    await expect(
+      composer.getByText('# visible line 2 edited at top', { exact: true }),
+    ).toBeVisible();
+
+    await scroller.hover();
+    await page.mouse.wheel(0, 1200);
+    await expect
+      .poll(() => scroller.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(0);
+    const target = composer.getByText('### visible line 45', { exact: true });
+    await expect(target).toBeVisible();
+    await target.click();
+    await composer.press('End');
+    await composer.pressSequentially(' edited after scroll');
+    await expect(
+      composer.getByText('### visible line 45 edited after scroll', {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await mocks.close();
+  });
+}
 
 test('virtual transcript keeps flat tool streams inside simple contracts', async ({
   page,
@@ -7113,26 +7165,44 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await composerInput.pressSequentially('!');
   await expect(composerInput).toContainText('foo @src/file.js! bar');
   await composerInput.fill('');
-  const initialComposerHeight = await composerInput.evaluate(
-    (element) => element.getBoundingClientRect().height,
+  const initialScrollerHeight = await composerInput.evaluate(
+    (element) =>
+      element
+        .closest('.cm-editor')
+        ?.querySelector('.cm-scroller')
+        ?.getBoundingClientRect().height ?? 0,
   );
   await composerInput.fill(
     Array.from({ length: 12 }, (_, index) => `line ${index}`).join('\n'),
   );
-  const grownComposerHeight = await composerInput.evaluate(
-    (element) => element.getBoundingClientRect().height,
+  const grownScrollerHeight = await composerInput.evaluate(
+    (element) =>
+      element
+        .closest('.cm-editor')
+        ?.querySelector('.cm-scroller')
+        ?.getBoundingClientRect().height ?? 0,
   );
-  expect(grownComposerHeight).toBeGreaterThan(initialComposerHeight);
-  expect(grownComposerHeight).toBeLessThanOrEqual(180);
+  expect(grownScrollerHeight).toBeGreaterThan(initialScrollerHeight);
+  expect(grownScrollerHeight).toBeLessThanOrEqual(180);
   await composerInput.fill(
     Array.from({ length: 60 }, (_, index) => `line ${index}`).join('\n'),
   );
-  const cappedComposer = await composerInput.evaluate((element) => ({
-    height: element.getBoundingClientRect().height,
-    scrollHeight: element.scrollHeight,
-  }));
-  expect(cappedComposer.height).toBeLessThanOrEqual(180);
-  expect(cappedComposer.scrollHeight).toBeGreaterThan(cappedComposer.height);
+  const cappedScroller = await composerInput.evaluate((element) => {
+    const editor = element.closest('.cm-editor');
+    const scroller = editor?.querySelector('.cm-scroller');
+    if (!scroller) throw new Error('Composer scroll container is missing');
+    return {
+      height: scroller.getBoundingClientRect().height,
+      clientHeight: scroller.clientHeight,
+      scrollHeight: scroller.scrollHeight,
+      contentOverflowY: getComputedStyle(element).overflowY,
+    };
+  });
+  expect(cappedScroller.height).toBeLessThanOrEqual(180);
+  expect(cappedScroller.scrollHeight).toBeGreaterThan(
+    cappedScroller.clientHeight,
+  );
+  expect(cappedScroller.contentOverflowY).toBe('visible');
   await composerInput.fill('');
   await composerInput.fill('# Live markdown heading');
   await expect(composerInput).toHaveText('# Live markdown heading');

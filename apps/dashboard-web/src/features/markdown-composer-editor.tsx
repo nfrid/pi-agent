@@ -8,13 +8,20 @@ import {
   markdownLanguage,
   markdown as markdownLanguageExtension,
 } from '@codemirror/lang-markdown';
-import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
-import { languages } from '@codemirror/language-data';
-import { Compartment, EditorState } from '@codemirror/state';
 import {
+  HighlightStyle,
+  syntaxHighlighting,
+  syntaxTree,
+} from '@codemirror/language';
+import { languages } from '@codemirror/language-data';
+import { Compartment, EditorState, type Range } from '@codemirror/state';
+import {
+  Decoration,
   EditorView,
   placeholder as editorPlaceholder,
   keymap,
+  ViewPlugin,
+  type ViewUpdate,
 } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import { dashboardHttpClient } from '@pi-dashboard/client';
@@ -55,6 +62,7 @@ const markdownHighlightStyle = HighlightStyle.define([
   { tag: tags.heading4, class: 'cm-heading4' },
   { tag: tags.heading5, class: 'cm-heading5' },
   { tag: tags.heading6, class: 'cm-heading6' },
+  { tag: tags.strikethrough, class: 'cm-strikethrough' },
   { tag: tags.emphasis, class: 'cm-emphasis' },
   { tag: tags.strong, class: 'cm-strong' },
   { tag: tags.link, class: 'cm-link' },
@@ -81,9 +89,8 @@ const editorTheme = EditorView.theme({
   },
   '.cm-placeholder': { color: 'var(--muted)' },
   '.cm-content': {
-    maxHeight: '180px',
-    overflowY: 'auto',
     padding: '10px 8px 8px',
+    paddingInlineEnd: 'calc(8px + var(--composer-actions-width, 0px))',
     caretColor: 'var(--fg)',
   },
   '.cm-line': { lineHeight: '1.55' },
@@ -93,6 +100,65 @@ const editorTheme = EditorView.theme({
     backgroundColor: 'var(--selection, #ffffff2b)',
   },
 });
+
+const composerMarkerDecorations = ViewPlugin.fromClass(
+  class {
+    decorations;
+
+    constructor(view: EditorView) {
+      this.decorations = this.build(view);
+    }
+
+    update(update: ViewUpdate) {
+      if (
+        update.docChanged ||
+        update.viewportChanged ||
+        syntaxTree(update.startState) !== syntaxTree(update.state)
+      )
+        this.decorations = this.build(update.view);
+    }
+
+    build(view: EditorView) {
+      const decorations: Range<Decoration>[] = [];
+      for (const { from, to } of view.visibleRanges) {
+        let line = view.state.doc.lineAt(from);
+        while (line.from <= to) {
+          const candidates = line.text.matchAll(
+            /(?:^|[\s([{])[@$][^\s@$]*|^\/[^\s/]*/gu,
+          );
+          for (const candidate of candidates) {
+            const start = candidate.index + candidate[0].search(/[@$/]/u);
+            const end = candidate.index + candidate[0].length;
+            const token = composerCompletionToken(line.text, end);
+            if (!token || token.start !== start || token.end !== end) continue;
+            let syntax = syntaxTree(view.state).resolve(line.from + start, 1);
+            let inCode = false;
+            while (true) {
+              if (syntax.name.includes('Code')) {
+                inCode = true;
+                break;
+              }
+              const parent = syntax.parent;
+              if (!parent) break;
+              syntax = parent;
+            }
+            if (inCode) continue;
+            decorations.push(
+              Decoration.mark({ class: `cm-composer-${token.kind}` }).range(
+                line.from + start,
+                line.from + end,
+              ),
+            );
+          }
+          if (line.to >= to || line.number === view.state.doc.lines) break;
+          line = view.state.doc.line(line.number + 1);
+        }
+      }
+      return Decoration.set(decorations, true);
+    }
+  },
+  { decorations: (plugin) => plugin.decorations },
+);
 
 function anchorKey(anchor: CompletionAnchor | undefined): string | undefined {
   return anchor ? `${anchor.from}:${anchor.to}:${anchor.prefix}` : undefined;
@@ -177,6 +243,7 @@ export default function MarkdownComposerEditor({
             pasteURLAsLink: false,
           }),
           syntaxHighlighting(markdownHighlightStyle),
+          composerMarkerDecorations,
           editorTheme,
           placeholderCompartment.of(editorPlaceholder('')),
           EditorView.lineWrapping,
