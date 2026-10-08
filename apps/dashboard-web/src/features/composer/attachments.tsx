@@ -8,43 +8,44 @@ import {
   useState,
 } from 'react';
 import {
-  addImageAttachments,
-  IMAGE_TYPES,
-  type ImageAttachment,
-} from '../../shared/image-attachments';
+  addFileAttachments,
+  type FileAttachment,
+  formatAttachmentSize,
+  isNativeImage,
+} from '../../shared/file-attachments';
 import { setDraftAttachmentCount } from '../drafts';
 
-export type { ImageAttachment } from '../../shared/image-attachments';
+export type { FileAttachment } from '../../shared/file-attachments';
 export {
-  addImageAttachments,
-  IMAGE_TYPES,
-  MAX_IMAGE_ATTACHMENTS,
-  MAX_IMAGE_SIZE,
-  MAX_IMAGE_TOTAL_SIZE,
-} from '../../shared/image-attachments';
+  addFileAttachments,
+  hasNativeImages,
+  isNativeImage,
+  MAX_ATTACHMENT_SIZE,
+  MAX_ATTACHMENTS,
+  MAX_TOTAL_ATTACHMENT_SIZE,
+  NATIVE_IMAGE_TYPES,
+  nativeImageCount,
+} from '../../shared/file-attachments';
 
-type ImageAttachmentInputProps = {
-  enabled: boolean;
-  busy: boolean;
-  inputRef: RefObject<HTMLInputElement | null>;
-  onFiles: (files: readonly File[]) => void;
-};
-
-export function ImageAttachmentInput({
+export function FileAttachmentInput({
   enabled,
   busy,
   inputRef,
   onFiles,
-}: ImageAttachmentInputProps) {
+}: {
+  enabled: boolean;
+  busy: boolean;
+  inputRef: RefObject<HTMLInputElement | null>;
+  onFiles: (files: readonly File[]) => void;
+}) {
   if (!enabled) return null;
   return (
     <input
       ref={inputRef}
       className="sr-only"
       type="file"
-      accept={IMAGE_TYPES.join(',')}
       multiple
-      aria-label="Choose images"
+      aria-label="Choose files"
       disabled={busy}
       onChange={(event) => {
         onFiles(Array.from(event.target.files ?? []));
@@ -54,27 +55,39 @@ export function ImageAttachmentInput({
   );
 }
 
-export function ImageAttachmentPreviews({
+export function FileAttachmentPreviews({
   attachments,
   busy,
   onRemove,
 }: {
-  attachments: readonly ImageAttachment[];
+  attachments: readonly FileAttachment[];
   busy: boolean;
-  onRemove: (previewUrl: string) => void;
+  onRemove: (id: string) => void;
 }) {
   if (!attachments.length) return null;
   return (
     <fieldset className="composer-previews">
-      <legend className="sr-only">Image attachments</legend>
-      {attachments.map((attachment) => (
-        <div className="composer-preview" key={attachment.previewUrl}>
-          <img src={attachment.previewUrl} alt={attachment.file.name} />
+      <legend className="sr-only">Attachments</legend>
+      {attachments.map(({ id, file, previewUrl }) => (
+        <div
+          className={`composer-preview${previewUrl ? '' : ' composer-file-preview-card'}`}
+          key={id}
+        >
+          {previewUrl ? (
+            <img src={previewUrl} alt={file.name} />
+          ) : (
+            <span className="composer-file-preview">
+              <span className="composer-file-name">{file.name}</span>
+              <span className="composer-file-size">
+                {formatAttachmentSize(file.size)}
+              </span>
+            </span>
+          )}
           <button
             type="button"
-            aria-label={`Remove ${attachment.file.name}`}
+            aria-label={`Remove ${file.name}`}
             disabled={busy}
-            onClick={() => onRemove(attachment.previewUrl)}
+            onClick={() => onRemove(id)}
           >
             ×
           </button>
@@ -84,7 +97,7 @@ export function ImageAttachmentPreviews({
   );
 }
 
-export function useImageAttachments({
+export function useFileAttachments({
   enabled,
   busy,
   onError,
@@ -94,16 +107,15 @@ export function useImageAttachments({
   enabled: boolean;
   busy: boolean;
   onError: (error: string | undefined) => void;
-  /** Draft metadata to protect while selected files are still held. */
   draftId?: string;
-  /** Dormant resume keeps selected files while the started runtime is checked. */
   clearOnDisable?: boolean;
 }) {
-  const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
-  const attachmentsRef = useRef<ImageAttachment[]>([]);
+  const [attachments, setAttachments] = useState<FileAttachment[]>([]);
+  const attachmentsRef = useRef<FileAttachment[]>([]);
   const [dragging, setDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mountedRef = useRef(false);
+  const nextAttachmentId = useRef(0);
 
   useEffect(() => {
     attachmentsRef.current = attachments;
@@ -117,7 +129,7 @@ export function useImageAttachments({
   );
   const clearAttachments = useCallback(() => {
     for (const attachment of attachmentsRef.current)
-      URL.revokeObjectURL(attachment.previewUrl);
+      if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
     attachmentsRef.current = [];
     if (mountedRef.current) {
       recordAttachmentCount(0);
@@ -137,24 +149,27 @@ export function useImageAttachments({
   useEffect(
     () => () => {
       for (const attachment of attachmentsRef.current)
-        URL.revokeObjectURL(attachment.previewUrl);
+        if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
       attachmentsRef.current = [];
       if (draftId) setDraftAttachmentCount(draftId, 0);
     },
     [draftId],
   );
 
-  const selectImages = useCallback(
+  const selectFiles = useCallback(
     (files: readonly File[]) => {
       if (!enabled || busy) return;
-      const result = addImageAttachments(
+      const result = addFileAttachments(
         attachmentsRef.current.map((attachment) => attachment.file),
         files,
       );
       if (result.accepted.length) {
         const added = result.accepted.map((file) => ({
+          id: String(nextAttachmentId.current++),
           file,
-          previewUrl: URL.createObjectURL(file),
+          ...(isNativeImage(file)
+            ? { previewUrl: URL.createObjectURL(file) }
+            : {}),
         }));
         attachmentsRef.current = [...attachmentsRef.current, ...added];
         recordAttachmentCount(attachmentsRef.current.length);
@@ -165,19 +180,19 @@ export function useImageAttachments({
     [busy, enabled, onError, recordAttachmentCount],
   );
 
-  const removeImage = useCallback(
-    (previewUrl: string) => {
+  const removeFile = useCallback(
+    (id: string) => {
       const attachment = attachmentsRef.current.find(
-        (candidate) => candidate.previewUrl === previewUrl,
+        (candidate) => candidate.id === id,
       );
       if (!attachment) return;
-      URL.revokeObjectURL(attachment.previewUrl);
+      if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
       attachmentsRef.current = attachmentsRef.current.filter(
-        (candidate) => candidate.previewUrl !== previewUrl,
+        (candidate) => candidate !== attachment,
       );
       recordAttachmentCount(attachmentsRef.current.length);
       setAttachments((current) =>
-        current.filter((candidate) => candidate.previewUrl !== previewUrl),
+        current.filter((candidate) => candidate !== attachment),
       );
     },
     [recordAttachmentCount],
@@ -204,9 +219,9 @@ export function useImageAttachments({
       if (!enabled || busy) return;
       event.preventDefault();
       setDragging(false);
-      selectImages(Array.from(event.dataTransfer.files));
+      selectFiles(Array.from(event.dataTransfer.files));
     },
-    [busy, enabled, selectImages],
+    [busy, enabled, selectFiles],
   );
   const onPasteCapture = useCallback(
     (event: ClipboardEvent<HTMLElement>) => {
@@ -218,20 +233,20 @@ export function useImageAttachments({
           return file ? [file] : [];
         },
       );
-      const images = files.length ? files : itemFiles;
-      if (!images.length) return;
+      const clipboardFiles = files.length ? files : itemFiles;
+      if (!clipboardFiles.length) return;
       event.preventDefault();
-      selectImages(images);
+      selectFiles(clipboardFiles);
     },
-    [busy, enabled, selectImages],
+    [busy, enabled, selectFiles],
   );
 
   return {
     attachments,
     dragging,
     fileInputRef,
-    selectImages,
-    removeImage,
+    selectFiles,
+    removeFile,
     clearAttachments,
     onDragEnter,
     onDragOver,

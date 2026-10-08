@@ -1,8 +1,11 @@
 export {
-  addImageAttachments,
-  MAX_IMAGE_ATTACHMENTS,
-  MAX_IMAGE_SIZE,
-  MAX_IMAGE_TOTAL_SIZE,
+  addFileAttachments,
+  hasNativeImages,
+  isNativeImage,
+  MAX_ATTACHMENT_SIZE,
+  MAX_ATTACHMENTS,
+  MAX_TOTAL_ATTACHMENT_SIZE,
+  NATIVE_IMAGE_TYPES,
 } from './composer/attachments';
 export {
   COMPOSER_DRAFT_STORAGE_PREFIX,

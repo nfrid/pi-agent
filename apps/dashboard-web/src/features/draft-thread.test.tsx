@@ -1,6 +1,8 @@
 import { act, create } from 'react-test-renderer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+let mockedDraftText = 'Do the thing';
+
 const draftDefaultState = vi.hoisted(() => ({
   selection: undefined as
     | {
@@ -64,6 +66,12 @@ const {
   },
 }));
 
+vi.mock('@pi-dashboard/protocol/pi-runtime-protocol', () => ({
+  IMAGE_TYPES: ['image/png', 'image/jpeg', 'image/webp'],
+  MAX_ATTACHMENT_COUNT: 4,
+  MAX_ATTACHMENT_BYTES: 5 * 1024 * 1024,
+  MAX_ATTACHMENT_TOTAL_BYTES: 12 * 1024 * 1024,
+}));
 vi.mock('@tanstack/react-query', () => ({
   useMutation: () => ({ isPending: false, mutateAsync }),
   useQuery: (options: { draftDefaultsQuery?: boolean }) =>
@@ -87,25 +95,30 @@ vi.mock('../routes/navigation', () => ({
   useDashboardNavigate: () => go,
 }));
 vi.mock('./agent-thread-nav', () => ({ AgentThreadNav: () => null }));
-vi.mock('./composer/attachments', () => ({
-  useImageAttachments: () => ({
-    attachments: imageAttachments,
-    dragging: false,
-    fileInputRef: { current: null },
-    selectImages: vi.fn(),
-    removeImage: vi.fn(),
-    onDragEnter: vi.fn(),
-    onDragOver: vi.fn(),
-    onDragLeave: vi.fn(),
-    onDrop: vi.fn(),
-    onPasteCapture: vi.fn(),
-    clearAttachments,
-  }),
-}));
+vi.mock('./composer/attachments', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('./composer/attachments')>();
+  return {
+    ...actual,
+    useFileAttachments: () => ({
+      attachments: imageAttachments,
+      dragging: false,
+      fileInputRef: { current: null },
+      selectFiles: vi.fn(),
+      removeFile: vi.fn(),
+      onDragEnter: vi.fn(),
+      onDragOver: vi.fn(),
+      onDragLeave: vi.fn(),
+      onDrop: vi.fn(),
+      onPasteCapture: vi.fn(),
+      clearAttachments,
+    }),
+  };
+});
 vi.mock('./composer/draft', () => ({
   useComposerDraft: () => ({
     initialDraft: 'Do the thing',
-    text: 'Do the thing',
+    text: mockedDraftText,
     updateText: vi.fn(),
     revision: 'revision-1',
     beginSubmission,
@@ -159,6 +172,7 @@ afterEach(() => {
   createThreadWithImages.mockReset();
   retryThreadWithImages.mockReset();
   imageAttachments.splice(0);
+  mockedDraftText = 'Do the thing';
   vi.unstubAllGlobals();
   draft.location = undefined;
   draft.promotedThreadId = undefined;
@@ -431,7 +445,7 @@ describe('draft thread promotion', () => {
     renderer.unmount();
   });
 
-  it('disables send and images while inherited defaults are unresolved', async () => {
+  it('disables send while inherited defaults are unresolved but keeps file selection available', async () => {
     draftDefaultState.ready = false;
     let renderer!: ReturnType<typeof create>;
     await act(async () => {
@@ -441,7 +455,7 @@ describe('draft thread promotion', () => {
     });
     const form = renderer.root.findByType('form');
     expect(form.props['data-send-disabled']).toBe('true');
-    expect(form.props['data-attachments-enabled']).toBe('false');
+    expect(form.props['data-attachments-enabled']).toBe('true');
     await act(async () => {
       await form.props.onSubmit({ preventDefault: vi.fn() });
     });
@@ -649,6 +663,46 @@ describe('draft thread promotion', () => {
       'thread-image',
       'revision-1',
     );
+    renderer.unmount();
+  });
+
+  it('starts a draft with only a generic file on a text-only model', async () => {
+    mockedDraftText = '';
+    const file = { name: 'notes.json', type: 'application/json' } as File;
+    imageAttachments.push({ file, previewUrl: '' });
+    createThreadWithImages.mockResolvedValue({ thread: { id: 'thread-file' } });
+    const textSnapshot = {
+      projects: [
+        { id: 'project-1', title: 'Project One', rootPath: '/work/one' },
+      ],
+      runtimes: [
+        {
+          modelCatalog: [
+            { provider: 'test', model: 'text', supportsImages: false },
+          ],
+        },
+      ],
+    } as never;
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(
+        <DraftThreadView draftId="draft-1" snapshot={textSnapshot} />,
+      );
+    });
+
+    await act(async () => {
+      await renderer.root.findByType('form').props.onSubmit({
+        preventDefault: vi.fn(),
+      });
+    });
+
+    expect(createThreadWithImages).toHaveBeenCalledWith(
+      'project-1',
+      expect.objectContaining({ prompt: '', title: 'File attachment' }),
+      [file],
+    );
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(clearAttachments).toHaveBeenCalledOnce();
     renderer.unmount();
   });
 

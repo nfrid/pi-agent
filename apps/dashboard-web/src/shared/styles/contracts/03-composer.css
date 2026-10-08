@@ -106,6 +106,33 @@
   height: 100%;
   object-fit: cover;
 }
+.composer-file-preview-card {
+  flex-basis: 150px;
+  width: 150px;
+  padding: 7px 24px 7px 8px;
+}
+.composer-file-preview {
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+.composer-file-name,
+.composer-file-size {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-file-name {
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+.composer-file-size {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
 .composer-preview button {
   position: absolute;
   top: 2px;

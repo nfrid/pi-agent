@@ -20,7 +20,11 @@ import {
   hasPendingLogicalRequest,
   hasSettledBackground,
 } from '../presentation-status';
-import { useImageAttachments } from './attachments';
+import {
+  hasNativeImages,
+  nativeImageCount,
+  useFileAttachments,
+} from './attachments';
 import { useComposerDraft } from './draft';
 import { AgentPicker } from './draft-pickers';
 import {
@@ -114,7 +118,7 @@ export function Composer({
   const [busy, setBusy] = useState(false);
   const [resumeError, setResumeError] = useState<string>();
   const [resumePending, setResumePending] = useState(false);
-  const dormantImageAttemptRef = useRef(false);
+  const dormantAttachmentAttemptRef = useRef(false);
   const commandMutation = useMutation(
     commandMutationOptions(dashboardHttpClient),
   );
@@ -166,25 +170,25 @@ export function Composer({
     ]),
   ];
   const attachmentsEnabled = runtime
-    ? runtime.liveState !== 'compacting' && runtimeSupportsImages(runtime)
-    : draftModelSupportsImages(resumeModel, runtimes);
+    ? runtime.liveState !== 'compacting'
+    : true;
   const {
     attachments,
     dragging,
     fileInputRef,
-    selectImages,
-    removeImage,
+    selectFiles,
+    removeFile,
     clearAttachments,
     onDragEnter,
     onDragOver,
     onDragLeave,
     onDrop,
     onPasteCapture,
-  } = useImageAttachments({
+  } = useFileAttachments({
     enabled: attachmentsEnabled,
     busy: busy || disabled || resumePending,
     draftId: sessionId,
-    clearOnDisable: !dormantImageAttemptRef.current,
+    clearOnDisable: !dormantAttachmentAttemptRef.current,
     onError: setError,
   });
   const submissionPolicy = runtime
@@ -216,14 +220,19 @@ export function Composer({
   ]);
   useEffect(() => {
     if (runtime && attachments.length === 0)
-      dormantImageAttemptRef.current = false;
+      dormantAttachmentAttemptRef.current = false;
   }, [attachments.length, runtime]);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const trimmedText = text.trim();
     if ((!trimmedText && !attachments.length) || submissionDisabled || busy)
       return;
-    if (attachments.length > 0 && !attachmentsEnabled) {
+    const hasAttachments = attachments.length > 0;
+    const hasImages = hasNativeImages(attachments);
+    const imagesSupported = runtime
+      ? runtimeSupportsImages(runtime)
+      : draftModelSupportsImages(resumeModel, runtimes);
+    if (hasImages && !imagesSupported) {
       setError('The selected model does not support image input.');
       return;
     }
@@ -231,12 +240,11 @@ export function Composer({
     setError(undefined);
     const submittedDraftRevision = beginSubmission();
     if (!runtime) {
-      const hasImages = attachments.length > 0;
       const request = resumeRuntimeRequest(
         projectId,
         checkoutId,
         sessionId,
-        hasImages ? undefined : trimmedText,
+        hasAttachments ? undefined : trimmedText,
         resumeModel
           ? {
               provider: resumeModel.provider,
@@ -253,7 +261,7 @@ export function Composer({
         return;
       }
       setResumeError(undefined);
-      dormantImageAttemptRef.current = hasImages;
+      dormantAttachmentAttemptRef.current = hasAttachments;
       setResumePending(true);
       try {
         // Text resumes use best-effort initialPrompt delivery; the durable
@@ -261,14 +269,14 @@ export function Composer({
         // The accepted operation continues after navigation; only React state
         // and mounted-only callbacks remain guarded below.
         const result = await resumeMutation.mutateAsync(request);
-        if (hasImages) {
+        if (hasAttachments) {
           if (!store)
             throw new Error('The dormant session store is unavailable.');
           const started = await waitForStartedRuntime(
             store,
             result.result.runtimeId,
           );
-          if (!runtimeSupportsImages(started))
+          if (hasImages && !runtimeSupportsImages(started))
             throw new Error(
               'The resumed runtime does not support image input.',
             );
@@ -302,11 +310,12 @@ export function Composer({
     try {
       if (queuesCurrentMessage) {
         const queueId = newQueueId();
+        const imageCount = nativeImageCount(attachments);
         const queuedItem = {
           id: queueId,
           mode: mode === 'prompt' ? ('followUp' as const) : mode,
           text: trimmedText,
-          ...(attachments.length > 0 ? { imageCount: attachments.length } : {}),
+          ...(imageCount > 0 ? { imageCount } : {}),
         };
         // Install the row before waiting for the HTTP acknowledgement. The
         // runtime event and command response are independent streams and may
@@ -399,8 +408,8 @@ export function Composer({
         }
         fileInputRef={fileInputRef}
         attachments={attachments}
-        onSelectImages={selectImages}
-        onRemoveImage={removeImage}
+        onSelectFiles={selectFiles}
+        onRemoveFile={removeFile}
         onPasteCapture={onPasteCapture}
         markdown={text}
         cwd={composerCwd}

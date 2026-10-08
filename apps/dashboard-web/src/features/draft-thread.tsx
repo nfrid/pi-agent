@@ -11,7 +11,7 @@ import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { useDashboardNavigate } from '../routes/navigation';
 import { errorMessage } from '../shared/lib/error-message';
 import { AgentThreadNav } from './agent-thread-nav';
-import { useImageAttachments } from './composer/attachments';
+import { hasNativeImages, useFileAttachments } from './composer/attachments';
 import { useComposerDraft } from './composer/draft';
 import {
   DraftAgentPicker,
@@ -159,8 +159,8 @@ export function DraftThreadView({
   );
   const modelResolutionReady =
     fallbackDraft?.model !== undefined || draftDefaults.isSuccess;
-  const attachments = useImageAttachments({
-    enabled: draftModelSupportsImages(selectedModel, snapshot.runtimes),
+  const attachments = useFileAttachments({
+    enabled: true,
     busy: submitting,
     draftId,
     onError: setError,
@@ -261,6 +261,14 @@ export function DraftThreadView({
       retryMutation.isPending
     )
       return;
+    const containsImages = hasNativeImages(attachments.attachments);
+    if (
+      containsImages &&
+      !draftModelSupportsImages(selectedModel, snapshot.runtimes)
+    ) {
+      setError('The selected model does not support image input.');
+      return;
+    }
     setError(undefined);
     setSubmitting(true);
     const submittedDraftRevision = beginSubmission();
@@ -306,7 +314,7 @@ export function DraftThreadView({
       }
       const createCommand = {
         commandId: draftPromotionCommandId(draftId),
-        title: threadTitle(prompt || 'Image attachment'),
+        title: threadTitle(prompt || 'File attachment'),
         prompt,
         ...(location.kind === 'current'
           ? {
@@ -432,15 +440,12 @@ export function DraftThreadView({
             onDragOver={attachments.onDragOver}
             onDragLeave={attachments.onDragLeave}
             onDrop={attachments.onDrop}
-            attachmentsEnabled={draftModelSupportsImages(
-              selectedModel,
-              snapshot.runtimes,
-            )}
+            attachmentsEnabled={true}
             attachmentsBusy={submitting}
             fileInputRef={attachments.fileInputRef}
             attachments={attachments.attachments}
-            onSelectImages={attachments.selectImages}
-            onRemoveImage={attachments.removeImage}
+            onSelectFiles={attachments.selectFiles}
+            onRemoveFile={attachments.removeFile}
             onPasteCapture={attachments.onPasteCapture}
             markdown={text}
             commands={composerCommands.data?.commands}

@@ -6,7 +6,7 @@ import {
 import type { BridgeEvent, RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import {
-  addImageAttachments,
+  addFileAttachments,
   asBrowserSnapshot,
   asSessionResponse,
   composerDraftStorageKey,
@@ -166,21 +166,21 @@ describe('composer drafts', () => {
   });
 });
 
-describe('image attachments', () => {
+describe('file attachments', () => {
   const image = (name: string, type: string, size: number) =>
     new File([new Uint8Array(size)], name, { type });
 
   it('accepts supported images within count and size limits', () => {
-    const result = addImageAttachments([], [image('one.png', 'image/png', 4)]);
+    const result = addFileAttachments([], [image('one.png', 'image/png', 4)]);
     expect(result).toEqual({ accepted: [expect.any(File)] });
   });
 
-  it('rejects unsupported, oversized, and over-count attachments', () => {
+  it('accepts other formats and rejects oversized or over-count attachments', () => {
     expect(
-      addImageAttachments([], [image('no.gif', 'image/gif', 1)]).error,
-    ).toContain('not a PNG');
+      addFileAttachments([], [image('notes.md', 'text/markdown', 1)]).accepted,
+    ).toEqual([expect.any(File)]);
     expect(
-      addImageAttachments(
+      addFileAttachments(
         [],
         [image('large.jpg', 'image/jpeg', 5 * 1024 * 1024 + 1)],
       ).error,
@@ -189,7 +189,7 @@ describe('image attachments', () => {
       image(`${index}.webp`, 'image/webp', 1),
     );
     expect(
-      addImageAttachments(existing, [image('fifth.webp', 'image/webp', 1)])
+      addFileAttachments(existing, [image('fifth.webp', 'image/webp', 1)])
         .error,
     ).toContain('up to 4');
   });

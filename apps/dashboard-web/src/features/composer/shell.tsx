@@ -9,8 +9,8 @@ import {
 } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
 import type { ComposerCommandOption } from '../composer-autocomplete';
-import type { ImageAttachment } from './attachments';
-import { ImageAttachmentInput, ImageAttachmentPreviews } from './attachments';
+import type { FileAttachment } from './attachments';
+import { FileAttachmentInput, FileAttachmentPreviews } from './attachments';
 import { MarkdownComposerEditor } from './editor';
 
 function submitOnShortcut(
@@ -87,8 +87,8 @@ export function ComposerShell({
   attachmentsBusy,
   fileInputRef,
   attachments,
-  onSelectImages,
-  onRemoveImage,
+  onSelectFiles,
+  onRemoveFile,
   onPasteCapture,
   commands,
   cwd,
@@ -116,9 +116,9 @@ export function ComposerShell({
   attachmentsEnabled: boolean;
   attachmentsBusy: boolean;
   fileInputRef: RefObject<HTMLInputElement | null>;
-  attachments: readonly ImageAttachment[];
-  onSelectImages: (files: readonly File[]) => void;
-  onRemoveImage: (id: string) => void;
+  attachments: readonly FileAttachment[];
+  onSelectFiles: (files: readonly File[]) => void;
+  onRemoveFile: (id: string) => void;
   onPasteCapture: ClipboardEventHandler<HTMLElement>;
   commands?: readonly ComposerCommandOption[];
   cwd?: string;
@@ -145,16 +145,16 @@ export function ComposerShell({
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
-      <ImageAttachmentInput
+      <FileAttachmentInput
         enabled={attachmentsEnabled}
         busy={attachmentsBusy}
         inputRef={fileInputRef}
-        onFiles={onSelectImages}
+        onFiles={onSelectFiles}
       />
-      <ImageAttachmentPreviews
+      <FileAttachmentPreviews
         attachments={attachments}
         busy={attachmentsBusy}
-        onRemove={onRemoveImage}
+        onRemove={onRemoveFile}
       />
       <ComposerRichSurface
         onPasteCapture={onPasteCapture}
@@ -175,13 +175,11 @@ export function ComposerShell({
             isDisabled={!attachmentsEnabled || attachmentsBusy}
             onPress={() => fileInputRef.current?.click()}
             aria-label={
-              attachmentsEnabled
-                ? 'Attach images'
-                : 'Attach images (unsupported by selected model)'
+              attachmentsEnabled ? 'Attach files' : 'Attach files (unavailable)'
             }
           >
             <span aria-hidden="true">＋</span>
-            <span className="composer-attach-label">Image</span>
+            <span className="composer-attach-label">File</span>
           </AriaButton>
           <AriaButton
             type="submit"

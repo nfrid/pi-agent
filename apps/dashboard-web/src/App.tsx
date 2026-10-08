@@ -24,10 +24,12 @@ export {
   agentThreadRows,
 } from './features/agent-thread-nav';
 export {
-  addImageAttachments,
+  addFileAttachments,
   composerDraftStorageKey,
   contextIndicatorData,
   formatContextTokens,
+  hasNativeImages,
+  isNativeImage,
   mergeQueuedMessages,
   queueCommand,
   queuedMessagesForRuntime,

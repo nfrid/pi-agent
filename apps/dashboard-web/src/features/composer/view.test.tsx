@@ -5,12 +5,24 @@ import { draftRuntimeOptionsStorageKey } from '../model-option';
 
 const mutateAsync = vi.fn(async () => ({ result: { runtimeId: 'runtime-1' } }));
 const sendCommandWithImages = vi.fn(async () => undefined);
+const addOptimistic = vi.fn();
 const clearAttachments = vi.fn();
 const acknowledgeDraft = vi.fn(() => true);
 const beginSubmission = vi.fn(() => 'revision-1');
 const releaseSubmission = vi.fn();
-let mockedAttachments: readonly { file: File; previewUrl: string }[] = [];
+let mockedAttachments: readonly {
+  id?: string;
+  file: File;
+  previewUrl?: string;
+}[] = [];
+let mockedText = 'resume me';
 
+vi.mock('@pi-dashboard/protocol/pi-runtime-protocol', () => ({
+  IMAGE_TYPES: ['image/png', 'image/jpeg', 'image/webp'],
+  MAX_ATTACHMENT_COUNT: 4,
+  MAX_ATTACHMENT_BYTES: 5 * 1024 * 1024,
+  MAX_ATTACHMENT_TOTAL_BYTES: 12 * 1024 * 1024,
+}));
 vi.mock('@tanstack/react-query', () => ({
   useMutation: () => ({ isPending: false, mutateAsync }),
   useQuery: () => ({ data: { commands: [] } }),
@@ -27,7 +39,7 @@ vi.mock('../../routes/navigation', () => ({
 vi.mock('./draft', () => ({
   useComposerDraft: () => ({
     initialDraft: 'resume me',
-    text: 'resume me',
+    text: mockedText,
     updateText: vi.fn(),
     revision: 'revision-1',
     beginSubmission,
@@ -35,21 +47,25 @@ vi.mock('./draft', () => ({
     acknowledgeDraft,
   }),
 }));
-vi.mock('./attachments', () => ({
-  useImageAttachments: () => ({
-    attachments: mockedAttachments,
-    dragging: false,
-    fileInputRef: { current: null },
-    selectImages: vi.fn(),
-    removeImage: vi.fn(),
-    clearAttachments,
-    onDragEnter: vi.fn(),
-    onDragOver: vi.fn(),
-    onDragLeave: vi.fn(),
-    onDrop: vi.fn(),
-    onPasteCapture: vi.fn(),
-  }),
-}));
+vi.mock('./attachments', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./attachments')>();
+  return {
+    ...actual,
+    useFileAttachments: () => ({
+      attachments: mockedAttachments,
+      dragging: false,
+      fileInputRef: { current: null },
+      selectFiles: vi.fn(),
+      removeFile: vi.fn(),
+      clearAttachments,
+      onDragEnter: vi.fn(),
+      onDragOver: vi.fn(),
+      onDragLeave: vi.fn(),
+      onDrop: vi.fn(),
+      onPasteCapture: vi.fn(),
+    }),
+  };
+});
 vi.mock('./queue', () => ({
   newQueueId: () => 'queue-1',
   QueuePanel: () => null,
@@ -58,7 +74,7 @@ vi.mock('./queue', () => ({
   useComposerQueue: () => ({
     queue: [],
     setQueue: vi.fn(),
-    addOptimistic: vi.fn(),
+    addOptimistic,
     rejectOptimistic: vi.fn(),
   }),
 }));
@@ -123,12 +139,14 @@ afterEach(() => {
   mutateAsync.mockReset();
   mutateAsync.mockResolvedValue({ result: { runtimeId: 'runtime-1' } });
   sendCommandWithImages.mockClear();
+  addOptimistic.mockClear();
   acknowledgeDraft.mockClear();
   acknowledgeDraft.mockReturnValue(true);
   beginSubmission.mockClear();
   releaseSubmission.mockClear();
   clearAttachments.mockClear();
   mockedAttachments = [];
+  mockedText = 'resume me';
   vi.unstubAllGlobals();
 });
 
@@ -426,7 +444,10 @@ describe('Composer dormant resume transition', () => {
 
   it('starts dormant image resumes without initialPrompt and sends once', async () => {
     mockedAttachments = [
-      { file: { name: 'image.png' } as File, previewUrl: 'preview' },
+      {
+        file: { name: 'image.png', type: 'image/png' } as File,
+        previewUrl: 'preview',
+      },
     ];
     const runtime = {
       runtimeId: 'runtime-1',
@@ -478,9 +499,76 @@ describe('Composer dormant resume transition', () => {
     expect(acknowledgeDraft).toHaveBeenCalledWith('revision-1');
   });
 
+  it('resumes a generic file-only draft on a text-only runtime', async () => {
+    mockedText = '';
+    const file = {
+      name: 'notes.json',
+      type: 'application/json',
+      size: 8,
+    } as File;
+    mockedAttachments = [{ id: 'file-1', file }];
+    const runtime = {
+      runtimeId: 'runtime-1',
+      liveState: 'idle',
+      online: true,
+      model: { provider: 'test', model: 'text', supportsImages: false },
+      modelCatalog: [
+        { provider: 'test', model: 'text', supportsImages: false },
+      ],
+      session: { id: 'session-1', entries: [] },
+    } as unknown as RuntimeSnapshot;
+    const store = {
+      getSnapshot: () => ({ runtimesById: { 'runtime-1': runtime } }),
+      subscribe: vi.fn(),
+    } as never;
+    const { Composer } = await import('./view');
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <Composer
+          runtime={undefined}
+          runtimes={[runtime]}
+          session={{
+            id: 'session-1',
+            file: '',
+            cwd: '/tmp',
+            updatedAt: 1,
+            lastKnownModel: { provider: 'test', model: 'text' },
+          }}
+          store={store}
+          sessionId="session-1"
+          projectId="project-1"
+          checkoutId="checkout-1"
+        />,
+      );
+    });
+
+    await act(async () => {
+      renderer.root.findByProps({ children: 'Send' }).props.onClick();
+      await Promise.resolve();
+    });
+
+    expect(mutateAsync).toHaveBeenCalledWith({
+      projectId: 'project-1',
+      checkoutId: 'checkout-1',
+      sessionId: 'session-1',
+      model: { provider: 'test', model: 'text' },
+    });
+    expect(sendCommandWithImages).toHaveBeenCalledWith(
+      'runtime-1',
+      { type: 'prompt', text: '' },
+      [file],
+    );
+    expect(clearAttachments).toHaveBeenCalledOnce();
+    renderer.unmount();
+  });
+
   it('completes an accepted image resume after the composer unmounts', async () => {
     mockedAttachments = [
-      { file: { name: 'image.png' } as File, previewUrl: 'preview' },
+      {
+        file: { name: 'image.png', type: 'image/png' } as File,
+        previewUrl: 'preview',
+      },
     ];
     acknowledgeDraft.mockReturnValue(true);
     let resolveStart!: (value: { result: { runtimeId: string } }) => void;
@@ -541,7 +629,10 @@ describe('Composer dormant resume transition', () => {
 
   it('preserves dormant images when capability or delivery fails', async () => {
     mockedAttachments = [
-      { file: { name: 'image.png' } as File, previewUrl: 'preview' },
+      {
+        file: { name: 'image.png', type: 'image/png' } as File,
+        previewUrl: 'preview',
+      },
     ];
     const runtime = {
       runtimeId: 'runtime-1',
@@ -600,5 +691,92 @@ describe('Composer dormant resume transition', () => {
     expect(sendCommandWithImages).toHaveBeenCalledOnce();
     expect(clearAttachments).not.toHaveBeenCalled();
     expect(acknowledgeDraft).not.toHaveBeenCalled();
+  });
+
+  it('queues only native image counts for generic file attachments', async () => {
+    const file = { name: 'vector.svg', type: 'image/svg+xml', size: 8 } as File;
+    mockedAttachments = [{ id: 'file-1', file }];
+    const runtime = {
+      runtimeId: 'runtime-text',
+      liveState: 'working',
+      online: true,
+      model: { provider: 'test', model: 'text', supportsImages: false },
+      session: { id: 'session-1', entries: [] },
+    } as unknown as RuntimeSnapshot;
+    const { Composer } = await import('./view');
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<Composer runtime={runtime} sessionId="session-1" />);
+    });
+
+    await act(async () => {
+      renderer.root.findByProps({ children: 'Send' }).props.onClick();
+      await Promise.resolve();
+    });
+
+    expect(addOptimistic).toHaveBeenCalledWith(
+      expect.not.objectContaining({ imageCount: expect.anything() }),
+    );
+    renderer.unmount();
+  });
+
+  it('rejects a native image on a text-only runtime without clearing it', async () => {
+    class TestElement {}
+    vi.stubGlobal('HTMLElement', TestElement);
+    vi.stubGlobal('SVGElement', TestElement);
+    const file = { name: 'image.png', type: 'image/png', size: 10 } as File;
+    mockedAttachments = [{ id: 'image-1', file, previewUrl: 'blob:image' }];
+    const runtime = {
+      runtimeId: 'runtime-text',
+      liveState: 'idle',
+      online: true,
+      model: { provider: 'test', model: 'text', supportsImages: false },
+      session: { id: 'session-1', entries: [] },
+    } as unknown as RuntimeSnapshot;
+    const { Composer } = await import('./view');
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<Composer runtime={runtime} sessionId="session-1" />);
+    });
+
+    await act(async () => {
+      renderer.root.findByProps({ children: 'Send' }).props.onClick();
+      await Promise.resolve();
+    });
+
+    expect(sendCommandWithImages).not.toHaveBeenCalled();
+    expect(clearAttachments).not.toHaveBeenCalled();
+    expect(mockedAttachments[0]?.file).toBe(file);
+    act(() => renderer.unmount());
+  });
+
+  it('sends a file-only submission on a text-only runtime and preserves it after failure', async () => {
+    mockedText = '';
+    const file = { name: 'notes.md', type: 'text/markdown', size: 10 } as File;
+    mockedAttachments = [{ id: 'file-1', file }];
+    const runtime = {
+      runtimeId: 'runtime-text',
+      liveState: 'idle',
+      online: true,
+      model: { provider: 'test', model: 'text', supportsImages: false },
+      session: { id: 'session-1', entries: [] },
+    } as unknown as RuntimeSnapshot;
+    const { Composer } = await import('./view');
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<Composer runtime={runtime} sessionId="session-1" />);
+    });
+    sendCommandWithImages.mockRejectedValueOnce(new Error('upload failed'));
+    await act(async () => {
+      renderer.root.findByProps({ children: 'Send' }).props.onClick();
+      await Promise.resolve();
+    });
+    expect(sendCommandWithImages).toHaveBeenCalledWith(
+      'runtime-text',
+      { type: 'prompt', text: '' },
+      [file],
+    );
+    expect(clearAttachments).not.toHaveBeenCalled();
+    expect(mockedAttachments[0]?.file).toBe(file);
   });
 });

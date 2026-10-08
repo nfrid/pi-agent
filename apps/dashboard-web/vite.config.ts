@@ -146,6 +146,10 @@ const config = defineConfig({
         __dirname,
         '../../packages/dashboard-client/src/index.ts',
       ),
+      '@pi-dashboard/protocol/pi-runtime-protocol': path.resolve(
+        __dirname,
+        '../../packages/dashboard-protocol/src/pi-runtime-protocol.ts',
+      ),
       '@pi-dashboard/protocol': path.resolve(
         __dirname,
         '../../packages/dashboard-protocol/src/index.ts',

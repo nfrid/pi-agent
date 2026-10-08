@@ -1,7 +1,7 @@
 export {
-  ImageAttachmentInput,
-  ImageAttachmentPreviews,
-  useImageAttachments,
+  FileAttachmentInput,
+  FileAttachmentPreviews,
+  useFileAttachments,
 } from './attachments';
 export {
   ComposerModelControl,

@@ -4182,9 +4182,9 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await expect(activity).toBeVisible();
   await expect(page.getByLabel('Message Pi')).toBeVisible();
   await expect(
-    page.getByRole('button', { name: 'Attach images' }),
+    page.getByRole('button', { name: 'Attach files' }),
   ).toBeVisible();
-  const imageInput = page.getByLabel('Choose images');
+  const imageInput = page.getByLabel('Choose files');
   await scrollTranscript(page, Number.MAX_SAFE_INTEGER);
   // Returning to latest must carry user intent; a programmatic scroll alone
   // intentionally does not re-enable following after inspecting older tools.
@@ -4195,12 +4195,21 @@ test('dense mobile session keeps conversation and activity readable', async ({
   const composerHeightBeforeAttachment = await page
     .locator('.composer')
     .evaluate((element) => element.getBoundingClientRect().height);
-  await imageInput.setInputFiles({
-    name: 'picker.png',
-    mimeType: 'image/png',
-    buffer: Buffer.from([137, 80, 78, 71]),
-  });
+  await imageInput.setInputFiles([
+    {
+      name: 'picker.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from([137, 80, 78, 71]),
+    },
+    {
+      name: 'notes.md',
+      mimeType: 'text/markdown',
+      buffer: Buffer.from('# notes'),
+    },
+  ]);
   await expect(page.getByAltText('picker.png')).toBeVisible();
+  await expect(page.getByText('notes.md', { exact: true })).toBeVisible();
+  await expect(page.getByText('7 B', { exact: true })).toBeVisible();
   await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(1);
   const attachmentLayout = await page.evaluate(() => {
     const composer = document.querySelector('.composer');
@@ -6986,6 +6995,46 @@ test('outline preview stays above the composer @desktop', async ({ page }) => {
   await mocks.close();
 });
 
+test('text-only runtime sends a file-only attachment in multipart files', async ({
+  page,
+}) => {
+  const base = phase6Snapshot({ liveState: 'idle' });
+  const runtime = base.runtimes[0];
+  if (!runtime) throw new Error('Text-only fixture runtime is missing');
+  const mocks = await installPhase6Mocks(page, {
+    snapshot: {
+      ...base,
+      runtimes: [
+        {
+          ...runtime,
+          model: { provider: 'test', model: 'text', supportsImages: false },
+        },
+      ],
+    },
+  });
+  await page.goto('/sessions/s1');
+  await page.getByLabel('Choose files').setInputFiles({
+    name: 'notes.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from('{"source":"browser"}'),
+  });
+  await expect(page.getByText('notes.json', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect
+    .poll(() =>
+      mocks.commands.findLast((command) => command.type === 'multipart'),
+    )
+    .toMatchObject({ type: 'multipart' });
+  const multipart = String(
+    mocks.commands.findLast((command) => command.type === 'multipart')?.body,
+  );
+  expect(multipart).toContain('name="files"');
+  expect(multipart).not.toContain('name="images"');
+  expect(multipart).toContain('filename="notes.json"');
+  expect(multipart).toContain('{"source":"browser"}');
+  await mocks.close();
+});
+
 test('phase six mocked session flow covers semantic controls and reconnect safety', async ({
   page,
 }) => {
@@ -7252,7 +7301,7 @@ const raw = true;
   await expect
     .poll(() => mocks.commands.findLast((command) => command.type === 'prompt'))
     .toMatchObject({ text: rawMessage });
-  await page.getByLabel('Choose images').setInputFiles({
+  await page.getByLabel('Choose files').setInputFiles({
     name: 'phase6.png',
     mimeType: 'image/png',
     buffer: Buffer.from([1, 2, 3]),

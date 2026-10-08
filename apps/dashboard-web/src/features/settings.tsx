@@ -31,7 +31,7 @@ import {
   useState,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { MAX_IMAGE_SIZE } from '../shared/image-attachments';
+import { MAX_ATTACHMENT_SIZE } from '../shared/file-attachments';
 import { errorMessage } from '../shared/lib/error-message';
 import {
   setTranscriptPreviewPreference,
@@ -941,7 +941,7 @@ function ProjectAdministration({ snapshot }: { snapshot: BrowserSnapshot }) {
     file: File,
     input?: HTMLInputElement,
   ) => {
-    if (file.size > MAX_IMAGE_SIZE) {
+    if (file.size > MAX_ATTACHMENT_SIZE) {
       setError('Project icons must be 5 MB or smaller.');
       if (input) input.value = '';
       return;
