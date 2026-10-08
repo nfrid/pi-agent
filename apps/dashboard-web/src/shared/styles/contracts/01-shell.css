@@ -411,6 +411,12 @@ h2 {
   margin: 12px 0;
   overflow-wrap: anywhere;
 }
+.transcript-compact-reply-top .message-bubble {
+  margin-top: 4px;
+}
+.transcript-compact-reply-bottom .message-bubble {
+  margin-bottom: 4px;
+}
 .message-bubble.message-has-branches {
   position: relative;
   padding-bottom: 30px;

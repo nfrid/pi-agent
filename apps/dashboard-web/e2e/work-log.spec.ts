@@ -1257,6 +1257,138 @@ for (const project of ['mobile', 'desktop']) {
     assertNoUnexpectedDashboardApiRequests(page);
   });
 
+  for (const renderer of ['normal', 'virtualized'] as const) {
+    test(`collapsed retained replies compact only their internal gap on ${project} (${renderer})${project === 'desktop' ? ' @desktop' : ''}`, async ({
+      page,
+    }) => {
+      const phase = (id: string) =>
+        JSON.stringify({ v: 1, id, phase: 'final_answer' });
+      const entries = [
+        {
+          type: 'message',
+          id: 'request',
+          message: { id: 'request', role: 'user', content: 'Review this work' },
+        },
+        ...Array.from(
+          { length: renderer === 'virtualized' ? 82 : 4 },
+          (_, index) => ({
+            type: 'message',
+            id: `history-${index}`,
+            message: {
+              id: `history-${index}`,
+              role: 'assistant',
+              content: `History ${index}`,
+            },
+          }),
+        ),
+        ...['first-reply', 'second-reply'].map((id, index) => ({
+          type: 'message',
+          id,
+          message: {
+            id,
+            role: 'assistant',
+            content: [
+              {
+                type: 'text',
+                text: `Retained reply ${index + 1}`,
+                textSignature: phase(id),
+              },
+            ],
+          },
+        })),
+        {
+          type: 'message',
+          id: 'final',
+          message: { id: 'final', role: 'assistant', content: 'Done' },
+        },
+        {
+          type: 'custom',
+          id: 'closure',
+          customType: 'response-closure',
+          data: {
+            requestMessageId: 'request',
+            finalMessageId: 'final',
+            startedAt: 1000,
+            endedAt: 91000,
+          },
+        },
+      ];
+      await installDashboardBootstrap(
+        page,
+        snapshot(`reply-spacing-${project}-${renderer}`),
+        {
+          strictApi: true,
+          sessionSnapshot: { entries },
+        },
+      );
+      await routeLegacySessionReads(page);
+      await page.goto('/sessions/session-1');
+      const transcript = page.getByLabel('Transcript', { exact: true });
+      if (renderer === 'virtualized') {
+        await expect(transcript.locator('.transcript-virtualizer')).toHaveCount(
+          1,
+        );
+      } else {
+        await expect(transcript.locator('.transcript-virtualizer')).toHaveCount(
+          0,
+        );
+      }
+      const first = transcript.getByText('Retained reply 1', { exact: true });
+      const second = transcript.getByText('Retained reply 2', { exact: true });
+      await expect(first).toBeVisible();
+      await expect(second).toBeVisible();
+      const bubbleMetrics = async (key: string) =>
+        transcript.locator(`[data-transcript-key="${key}"]`).evaluate((row) => {
+          const bubble = row.querySelector<HTMLElement>('.message-bubble');
+          if (!bubble)
+            throw new Error(
+              `Missing mounted bubble in row: ${row.dataset.transcriptKey}`,
+            );
+          const { top, bottom } = bubble.getBoundingClientRect();
+          const style = getComputedStyle(bubble);
+          return {
+            top,
+            bottom,
+            marginTop: style.marginTop,
+            marginBottom: style.marginBottom,
+          };
+        });
+      const state = async () => {
+        const [firstReply, secondReply, final] = await Promise.all([
+          bubbleMetrics('first-reply'),
+          bubbleMetrics('second-reply'),
+          bubbleMetrics('final'),
+        ]);
+        return {
+          replyGap: secondReply.top - firstReply.bottom,
+          outerTopMargin: firstReply.marginTop,
+          outerBottomMargin: final.marginBottom,
+        };
+      };
+      const collapsed = await state();
+      expect(
+        await transcript
+          .locator('[data-transcript-key="first-reply"]')
+          .getAttribute('class'),
+      ).toContain('transcript-compact-reply-bottom');
+      const workLog = transcript.getByRole('button', { name: /Worked for/ });
+      await workLog.click();
+      await expect(workLog).toHaveAttribute('aria-expanded', 'true');
+      const expanded = await state();
+      expect(expanded.replyGap).toBeGreaterThan(collapsed.replyGap);
+      expect(expanded.outerTopMargin).toBe(collapsed.outerTopMargin);
+      expect(expanded.outerBottomMargin).toBe(collapsed.outerBottomMargin);
+      await workLog.click();
+      await expect(workLog).toHaveAttribute('aria-expanded', 'false');
+      const recollapsed = await state();
+      expect(recollapsed.replyGap).toBeLessThan(expanded.replyGap);
+      expect(recollapsed.replyGap).toBeCloseTo(collapsed.replyGap, 0);
+      expect(recollapsed.outerTopMargin).toBe(collapsed.outerTopMargin);
+      expect(recollapsed.outerBottomMargin).toBe(collapsed.outerBottomMargin);
+      assertNoUnexpectedDashboardApiRequests(page);
+    });
+  }
+
   test(`virtualized work logs retain every marked answer on ${project}${project === 'desktop' ? ' @desktop' : ''}`, async ({
     page,
   }) => {

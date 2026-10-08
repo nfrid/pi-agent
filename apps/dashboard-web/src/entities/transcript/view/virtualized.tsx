@@ -549,7 +549,18 @@ export function VirtualizedTranscript({
                   }}
                 />
               ) : (
-                <div data-transcript-key={items[row.index]?.key}>
+                <div
+                  data-transcript-key={items[row.index]?.key}
+                  className={
+                    row.compactTop
+                      ? row.compactBottom
+                        ? 'transcript-compact-reply-top transcript-compact-reply-bottom'
+                        : 'transcript-compact-reply-top'
+                      : row.compactBottom
+                        ? 'transcript-compact-reply-bottom'
+                        : undefined
+                  }
+                >
                   <TranscriptEntry
                     item={
                       row.text === undefined

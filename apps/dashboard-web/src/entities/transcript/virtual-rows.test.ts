@@ -165,6 +165,131 @@ describe('transcript work-log row plan', () => {
     });
   });
 
+  it('marks only adjacent retained replies inside one collapsed closure', () => {
+    const rows = buildVirtualTranscriptRows([
+      item('request', 'user'),
+      item('reply-one', 'assistant', {
+        textPhase: {
+          answerText: 'One',
+          fallbackText: '',
+          hasAnswer: true,
+          hasPhase: true,
+        },
+      }),
+      item('reply-two', 'assistant', {
+        textPhase: {
+          answerText: 'Two',
+          fallbackText: '',
+          hasAnswer: true,
+          hasPhase: true,
+        },
+      }),
+      item('final', 'assistant', {
+        workLogClosure: {
+          requestMessageId: 'request',
+          finalMessageId: 'final',
+          startedAt: 1,
+          endedAt: 2,
+        },
+      }),
+    ]);
+    const entryRows = rows.filter((row) => row.kind === 'entry');
+    expect(entryRows.map((row) => row.key)).toEqual([
+      'request',
+      'reply-one',
+      'reply-two',
+      'final',
+    ]);
+    expect(entryRows[0]).not.toHaveProperty('compactTop');
+    expect(entryRows[0]).not.toHaveProperty('compactBottom');
+    expect(entryRows[1]).toMatchObject({ compactBottom: true });
+    expect(entryRows[2]).toMatchObject({
+      compactTop: true,
+      compactBottom: true,
+    });
+    expect(entryRows[3]).toMatchObject({ compactTop: true });
+  });
+
+  it('leaves single replies, expanded closures, and separate request boundaries unchanged', () => {
+    expect(
+      buildVirtualTranscriptRows(items).find(
+        (row) => row.kind === 'entry' && row.key === 'answer',
+      ),
+    ).not.toHaveProperty('compactTop');
+    const expanded = buildVirtualTranscriptRows(
+      [
+        item('request', 'user'),
+        item('reply-one', 'assistant', {
+          textPhase: {
+            answerText: 'One',
+            fallbackText: '',
+            hasAnswer: true,
+            hasPhase: true,
+          },
+        }),
+        item('reply-two', 'assistant', {
+          textPhase: {
+            answerText: 'Two',
+            fallbackText: '',
+            hasAnswer: true,
+            hasPhase: true,
+          },
+        }),
+        item('final', 'assistant', {
+          workLogClosure: {
+            requestMessageId: 'request',
+            finalMessageId: 'final',
+            startedAt: 1,
+            endedAt: 2,
+          },
+        }),
+      ],
+      new Set(['work-log-final']),
+    );
+    expect(
+      expanded.some(
+        (row) => row.kind === 'entry' && (row.compactTop || row.compactBottom),
+      ),
+    ).toBe(false);
+    const separateClosures = buildVirtualTranscriptRows([
+      item('request-one', 'user'),
+      item('reply-one', 'assistant', {
+        textPhase: {
+          answerText: 'One',
+          fallbackText: '',
+          hasAnswer: true,
+          hasPhase: true,
+        },
+        workLogClosure: {
+          requestMessageId: 'request-one',
+          finalMessageId: 'reply-one',
+          startedAt: 1,
+          endedAt: 2,
+        },
+      }),
+      item('request-two', 'user'),
+      item('reply-two', 'assistant', {
+        textPhase: {
+          answerText: 'Two',
+          fallbackText: '',
+          hasAnswer: true,
+          hasPhase: true,
+        },
+        workLogClosure: {
+          requestMessageId: 'request-two',
+          finalMessageId: 'reply-two',
+          startedAt: 3,
+          endedAt: 4,
+        },
+      }),
+    ]);
+    expect(
+      separateClosures.some(
+        (row) => row.kind === 'entry' && (row.compactTop || row.compactBottom),
+      ),
+    ).toBe(false);
+  });
+
   it('restores the interior rows when the stable disclosure key is open', () => {
     const rows = buildVirtualTranscriptRows(
       items,

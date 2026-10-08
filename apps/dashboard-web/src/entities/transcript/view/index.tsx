@@ -542,7 +542,19 @@ function TranscriptContent({
     const item = items[row.index];
     if (!item) return null;
     return (
-      <div data-transcript-key={item.key} key={row.key}>
+      <div
+        data-transcript-key={item.key}
+        key={row.key}
+        className={
+          row.compactTop
+            ? row.compactBottom
+              ? 'transcript-compact-reply-top transcript-compact-reply-bottom'
+              : 'transcript-compact-reply-top'
+            : row.compactBottom
+              ? 'transcript-compact-reply-bottom'
+              : undefined
+        }
+      >
         <TranscriptEntry
           item={row.text === undefined ? item : { ...item, text: row.text }}
           showThinking={row.showThinking ?? true}

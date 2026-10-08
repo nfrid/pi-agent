@@ -130,6 +130,8 @@ export type VirtualTranscriptRow =
       index: number;
       text?: string;
       showThinking?: boolean;
+      compactTop?: boolean;
+      compactBottom?: boolean;
     }
   | { kind: 'tool-stream'; key: string; start: number; end: number }
   | {
@@ -437,11 +439,27 @@ export function buildVirtualTranscriptRows(
           }),
       expanded,
     });
-    if (!expanded)
+    if (!expanded) {
       for (let index = result.length - 1; index >= 0; index -= 1) {
         const row = result[index];
         if (row && hidden.has(row)) result.splice(index, 1);
       }
+      for (let index = 1; index < result.length; index += 1) {
+        const previous = result[index - 1];
+        const current = result[index];
+        if (
+          previous?.kind === 'entry' &&
+          current?.kind === 'entry' &&
+          previous.index >= start &&
+          current.index <= finalIndex &&
+          items[previous.index]?.role === 'assistant' &&
+          items[current.index]?.role === 'assistant'
+        ) {
+          previous.compactBottom = true;
+          current.compactTop = true;
+        }
+      }
+    }
   }
   return result;
 }
