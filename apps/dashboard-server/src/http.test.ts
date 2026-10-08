@@ -1557,7 +1557,10 @@ describe('dashboard HTTP boundary', () => {
     await expect(server.start()).resolves.toBeUndefined();
   });
 
-  it('delivers an empty generic file to a non-image runtime and retains it after an uncertain ack', async () => {
+  it.each([
+    false,
+    true,
+  ])('delivers durable files and retains uncertain sends (native images: %s)', async (supportsImages) => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-file-'));
     server = await createDashboardServer({
       port: 0,
@@ -1566,7 +1569,7 @@ describe('dashboard HTTP boundary', () => {
       sessionDir: path.join(root, 'sessions'),
       registry: new RuntimeRegistry({
         allowExternalWithoutToken: true,
-        commandTimeoutMs: 20,
+        commandTimeoutMs: 100,
       }),
     });
     await server.start();
@@ -1591,8 +1594,8 @@ describe('dashboard HTTP boundary', () => {
             session: { id: 'image-session', entries: [] },
             model: {
               provider: 'test',
-              model: 'text-only',
-              supportsImages: false,
+              model: supportsImages ? 'vision' : 'text-only',
+              supportsImages,
             },
           },
         },
@@ -1601,6 +1604,7 @@ describe('dashboard HTTP boundary', () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     let buffered = '';
     let durablePath: string | undefined;
+    let temporaryPath: string | undefined;
     let timedOutPath: string | undefined;
     let timeoutObserved!: () => void;
     const timeoutSeen = new Promise<void>((resolve) => {
@@ -1630,8 +1634,24 @@ describe('dashboard HTTP boundary', () => {
             return;
           }
           expect(frame.command.type).toBe('prompt');
-          expect(frame.command.text).not.toContain('describe this');
-          expect(frame.command.images).toBeUndefined();
+          if (supportsImages) {
+            expect(frame.command.images).toEqual([
+              expect.objectContaining({
+                type: 'image',
+                mediaType: 'image/png',
+              }),
+            ]);
+            temporaryPath = frame.command.images?.[0]?.path;
+            expect(temporaryPath).toBeTruthy();
+            await expect(
+              readFile(temporaryPath as string),
+            ).resolves.toBeTruthy();
+            expect((await stat(temporaryPath as string)).mode & 0o777).toBe(
+              0o600,
+            );
+          } else {
+            expect(frame.command.images).toBeUndefined();
+          }
           const pathMatch = frame.command.text.match(/at "([^"]+)"/);
           durablePath = pathMatch?.[1];
           expect(frame.command.text).toContain('empty.txt');
@@ -1653,6 +1673,23 @@ describe('dashboard HTTP boundary', () => {
     const form = new FormData();
     form.set('command', JSON.stringify({ type: 'prompt', text: '' }));
     form.append('files', new Blob([]), 'empty.txt');
+    if (supportsImages) {
+      form.append(
+        'images',
+        new Blob(
+          [
+            new Uint8Array(
+              Buffer.from(
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+                'base64',
+              ),
+            ),
+          ],
+          { type: 'image/png' },
+        ),
+        'sample.png',
+      );
+    }
     const response = await fetch(
       `http://127.0.0.1:${server.port}/api/runtimes/image-runtime/command`,
       {
@@ -1666,6 +1703,7 @@ describe('dashboard HTTP boundary', () => {
     );
     await commandSeen;
     expect(response.status).toBe(200);
+    if (temporaryPath) await expect(readFile(temporaryPath)).rejects.toThrow();
     await expect(readFile(durablePath as string)).resolves.toEqual(
       Buffer.alloc(0),
     );

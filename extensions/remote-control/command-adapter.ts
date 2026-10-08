@@ -283,8 +283,6 @@ export async function dispatchDashboardInput(
     invocation &&
     (known?.source === 'extension' || PI_BUILTIN_COMMANDS.has(invocation.name))
   ) {
-    if (images.length > 0)
-      throw new Error('Images cannot be attached to dashboard commands.');
     throw new Error(
       `Command "/${invocation.name}" is not available through the dashboard yet.`,
     );

@@ -872,15 +872,17 @@ test('draft composer completes slash commands before a runtime starts', async ({
       ),
     )
     .toBe('# Rehydrated source\n\n```unknown-language\n<b>literal</b>\n```');
-  await editor.fill('/rev');
+  const modifier = await editor.evaluate(() =>
+    /Mac|iPhone|iPad/.test(navigator.platform) ? 'Meta' : 'Control',
+  );
+  await editor.click();
+  await editor.press(`${modifier}+a`);
+  await editor.pressSequentially('/rev');
   await expect(page.getByRole('option', { name: /\/review/ })).toBeVisible();
   await editor.press('Tab');
   await expect(editor).toContainText('/review');
   expect(await editor.evaluate(() => window.getSelection()?.anchorOffset)).toBe(
     '/review'.length,
-  );
-  const modifier = await editor.evaluate(() =>
-    /Mac|iPhone|iPad/.test(navigator.platform) ? 'Meta' : 'Control',
   );
   await editor.pressSequentially(' undo');
   await expect(editor).toHaveText('/review undo');

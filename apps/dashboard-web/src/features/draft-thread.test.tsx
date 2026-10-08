@@ -66,12 +66,6 @@ const {
   },
 }));
 
-vi.mock('@pi-dashboard/protocol/pi-runtime-protocol', () => ({
-  IMAGE_TYPES: ['image/png', 'image/jpeg', 'image/webp'],
-  MAX_ATTACHMENT_COUNT: 4,
-  MAX_ATTACHMENT_BYTES: 5 * 1024 * 1024,
-  MAX_ATTACHMENT_TOTAL_BYTES: 12 * 1024 * 1024,
-}));
 vi.mock('@tanstack/react-query', () => ({
   useMutation: () => ({ isPending: false, mutateAsync }),
   useQuery: (options: { draftDefaultsQuery?: boolean }) =>

@@ -13,6 +13,10 @@ export default defineConfig({
         __dirname,
         '../dashboard-domain/src/index.ts',
       ),
+      '@pi-dashboard/protocol/pi-runtime-protocol': path.resolve(
+        __dirname,
+        '../dashboard-protocol/src/pi-runtime-protocol.ts',
+      ),
       '@pi-dashboard/protocol': path.resolve(
         __dirname,
         '../dashboard-protocol/src/index.ts',

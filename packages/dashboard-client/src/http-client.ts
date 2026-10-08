@@ -329,7 +329,6 @@ function normalizeBaseUrl(value: string): string {
   return value.replace(/\/$/u, '');
 }
 
-/** Typed, authenticated browser HTTP boundary for dashboard API calls. */
 function appendAttachmentFiles(body: FormData, files: readonly File[]): void {
   for (const file of files)
     body.append(
@@ -341,6 +340,7 @@ function appendAttachmentFiles(body: FormData, files: readonly File[]): void {
     );
 }
 
+/** Typed, authenticated browser HTTP boundary for dashboard API calls. */
 export class DashboardHttpClient {
   readonly baseUrl: string;
   readonly tokenStore: DashboardTokenStore;

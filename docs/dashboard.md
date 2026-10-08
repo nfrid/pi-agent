@@ -271,8 +271,9 @@ virtualized. Activity-group headers are the sole sticky transcript landmark.
 ### File attachments
 
 The composer accepts any file format through the file picker, drag and drop, or
-file paste. A message can contain up to four attachments, each at most 5 MiB,
-with a combined limit of 12 MiB. Empty non-image files are allowed.
+file paste. Generic files cannot accompany slash-command invocations; send them
+with a normal message. A message can contain up to four attachments, each at most
+5 MiB, with a combined limit of 12 MiB. Empty non-image files are allowed.
 
 PNG, JPEG, and WebP images retain their native model input and previews and
 require an image-capable model. Other files, including unsupported image
