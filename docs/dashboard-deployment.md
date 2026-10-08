@@ -6,6 +6,7 @@ The production dashboard is served from generated `dist/` directories by the mac
 
 - Read `apps/dashboard-web/playwright.config.ts` before adding hover or responsive assertions. The default Playwright configuration may only define a mobile project; desktop-only behavior needs an explicit desktop context or project.
 - Run filtered Playwright tests with `bun run --filter @pi-dashboard/web test:e2e -- --grep "<test name>"`.
+- Replace CodeMirror composer text through keyboard select-all and native typing or `insertText`, not `locator.fill()` on its controlled contenteditable DOM. DOM-level fills can race draft synchronization and leave old text behind; keep the text and submission assertions intact.
 - Hidden tooltip, preview, and accessibility-only DOM can still make Playwright text locators ambiguous. Avoid duplicating decorative text in DOM nodes when `data-*` attributes or CSS-generated content suffice. Otherwise, scope text assertions to the semantic transcript or control that owns the text.
 - The default test ports are shared process resources. If either is occupied, identify its owner rather than stopping an unfamiliar process, choose an unused pair, and run with `PI_DASHBOARD_E2E_PORT=<port> PI_DASHBOARD_E2E_API_PORT=<port> bun run --filter @pi-dashboard/web test:e2e`.
 

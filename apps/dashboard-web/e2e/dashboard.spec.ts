@@ -7289,7 +7289,13 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
 \`\`\`unknown-language
 const raw = true;
 \`\`\``;
-  await composerInput.fill(rawMessage);
+  const composerModifier = await composerInput.evaluate(() =>
+    /Mac|iPhone|iPad/.test(navigator.platform) ? 'Meta' : 'Control',
+  );
+  await composerInput.click();
+  await composerInput.press(`${composerModifier}+a`);
+  await composerInput.press('Backspace');
+  await page.keyboard.insertText(rawMessage);
   await expect
     .poll(() =>
       composerInput.evaluate((element) =>
