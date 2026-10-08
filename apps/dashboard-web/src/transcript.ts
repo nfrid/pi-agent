@@ -228,14 +228,14 @@ function responseTextPhase(content: unknown): TranscriptModelItem['textPhase'] {
       fallback.push(part.text);
     }
   }
-  return hasPhase
-    ? {
-        answerText: answers.join('\n\n').trim(),
-        fallbackText: fallback.join('\n\n').trim(),
-        hasAnswer: answers.length > 0,
-        hasPhase,
-      }
-    : undefined;
+  if (!hasPhase) return undefined;
+  const answerText = answers.join('\n\n').trim();
+  return {
+    answerText,
+    fallbackText: fallback.join('\n\n').trim(),
+    hasAnswer: Boolean(answerText),
+    hasPhase,
+  };
 }
 
 function messageThinking(content: unknown): string[] {

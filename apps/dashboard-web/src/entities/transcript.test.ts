@@ -708,6 +708,70 @@ describe('tool row views and virtual transcript construction', () => {
     ).not.toHaveProperty('text');
   });
 
+  it('hides waiting commentary with empty final blocks and restores it on expansion', () => {
+    const textBlock = (
+      id: string,
+      text: string,
+      phase: 'commentary' | 'final_answer',
+    ) => ({
+      type: 'text',
+      text,
+      textSignature: JSON.stringify({ v: 1, id, phase }),
+    });
+    const items = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'request',
+        message: { role: 'user', content: 'Request' },
+      },
+      {
+        type: 'message',
+        id: 'answer',
+        message: {
+          role: 'assistant',
+          content: [textBlock('answer', 'Main answer', 'final_answer')],
+        },
+      },
+      ...['wait-one', 'wait-two'].map((id, index) => ({
+        type: 'message',
+        id,
+        message: {
+          role: 'assistant',
+          content: [
+            textBlock(`${id}-notice`, `Waiting ${index + 1}`, 'commentary'),
+            textBlock(`${id}-end`, index === 0 ? '   \n' : '', 'final_answer'),
+          ],
+        },
+      })),
+      {
+        type: 'custom',
+        id: 'closure',
+        customType: 'response-closure',
+        data: {
+          requestMessageId: 'request',
+          finalMessageId: 'wait-two',
+          startedAt: 10,
+          endedAt: 90,
+        },
+      },
+    ]);
+    const collapsed = buildVirtualTranscriptRows(items);
+    expect(
+      collapsed
+        .filter((row) => row.kind === 'entry')
+        .map((row) => row.text ?? items[row.index]?.text),
+    ).toEqual(['Request', 'Main answer']);
+    const expanded = buildVirtualTranscriptRows(
+      items,
+      new Set(['work-log-wait-two']),
+    );
+    expect(
+      expanded
+        .filter((row) => row.kind === 'entry')
+        .map((row) => row.text ?? items[row.index]?.text),
+    ).toEqual(['Request', 'Main answer', 'Waiting 1', 'Waiting 2']);
+  });
+
   it('treats malformed and unknown text signatures as absent', () => {
     const [invalid, unknown] = toTranscriptEntries([
       {

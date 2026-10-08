@@ -299,6 +299,10 @@ and bounds a compact **Work log** after the request. It does not select the answ
 Marked OpenAI Responses `final_answer` text blocks remain visible in order, while
 commentary stays in the disclosed work log. Mixed messages show only selected answer
 text while collapsed, and later marked answers remain visible after optional work.
+Phase metadata does not guarantee that text is substantive. Waiting guidance asks
+models to put waiting notices in commentary, without `final_answer` text. This
+neither enforces provider phases nor relabels saved history. Empty final-phase
+blocks do not create visible replies.
 The closing message retains the existing full-message fallback when its phase is absent
 or invalid, and pagination remains lazy. The work log shows elapsed wall-clock
 time, including background waits, and an action count that excludes codemode wrappers
@@ -309,6 +313,8 @@ bounds stays collapsed even when its historical body is not loaded. Opening the 
 or navigating into it loads through its request using the existing history loader;
 closing during loading prevents a late expansion. Partial bodies do not invent a
 complete action count. Older unmarked history retains its existing presentation.
+Adjacent retained assistant replies within one collapsed request use compact spacing.
+Single replies, separate requests, and expanded activity keep their normal spacing.
 
 New closures preserve the work log when the reader has scrolled away from the tail
 or opened its technical details. Outline navigation opens a containing work log when

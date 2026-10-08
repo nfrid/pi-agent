@@ -128,9 +128,9 @@ describe('background terminals extension', () => {
     expect(guidance).toContain(
       'at most one brief assistant commentary message',
     );
-    expect(guidance).toContain('without a `final_answer`');
+    expect(guidance).toContain('without any `final_answer` text');
     expect(guidance).toContain(
-      'Reserve `final_answer` for substantive answers',
+      'Reserve `final_answer` text for substantive answers',
     );
     expect(guidance).toContain(
       'including a real early answer when optional work remains pending',

@@ -1366,11 +1366,6 @@ for (const project of ['mobile', 'desktop']) {
         };
       };
       const collapsed = await state();
-      expect(
-        await transcript
-          .locator('[data-transcript-key="first-reply"]')
-          .getAttribute('class'),
-      ).toContain('transcript-compact-reply-bottom');
       const workLog = transcript.getByRole('button', { name: /Worked for/ });
       await workLog.click();
       await expect(workLog).toHaveAttribute('aria-expanded', 'true');
