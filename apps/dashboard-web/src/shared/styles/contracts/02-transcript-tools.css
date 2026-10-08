@@ -1,11 +1,32 @@
 /* Transcript contract: ordinary messages and compact tool-call streams. */
-.transcript-work-log {
+.transcript-work-log-scope {
+  display: flow-root;
+  position: relative;
+  min-width: 0;
   margin: 6px 0;
+}
+.transcript-work-log {
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  margin: 0;
+  background: var(--bg);
+}
+.transcript-work-log-scope-virtualized {
+  margin: 0;
+}
+.transcript-work-log-scope-virtualized > .transcript-work-log {
+  position: relative;
+}
+.transcript-work-log-history {
+  min-width: 0;
 }
 .transcript-work-log-toggle {
   display: flex;
   width: 100%;
+  min-width: 0;
   min-height: 28px;
+  flex-wrap: wrap;
   align-items: center;
   gap: 7px;
   border: 0;
@@ -48,9 +69,14 @@
 }
 .transcript-tool-stream-expanded > .tool-stream-meta {
   position: sticky;
-  top: 0;
+  top: var(--transcript-work-log-header-offset, 0px);
   z-index: 24;
   background: var(--bg);
+}
+:where(.transcript-work-log-scope-expanded)
+  .transcript-tool-stream-expanded
+  > .tool-stream-meta {
+  top: var(--transcript-work-log-header-height, 0px);
 }
 .tool-stream-toggle {
   display: inline-flex;

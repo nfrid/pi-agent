@@ -128,6 +128,9 @@ function TranscriptContent({
   const [openToolDetails, setOpenToolDetails] = useState<Set<string>>(
     new Set(),
   );
+  const ordinaryWorkLogAnchorRef = useRef<
+    { key: string; top: number } | undefined
+  >(undefined);
   const previousClosuresRef = useRef<Set<string> | undefined>(undefined);
   const previousItemsRef = useRef<readonly TranscriptModelItem[] | undefined>(
     undefined,
@@ -181,6 +184,22 @@ function TranscriptContent({
       }),
     [historyStart, items, openForPlan, outline],
   );
+  useLayoutEffect(() => {
+    void rows;
+    const anchor = ordinaryWorkLogAnchorRef.current;
+    const scrollElement = transcriptScrollElementRef?.current;
+    if (!anchor || !scrollElement) return;
+    const header = Array.from(
+      scrollElement.querySelectorAll<HTMLElement>('[data-transcript-key]'),
+    ).find((element) => element.dataset.transcriptKey === anchor.key);
+    if (header) {
+      scrollElement.scrollTop +=
+        header.getBoundingClientRect().top -
+        scrollElement.getBoundingClientRect().top -
+        anchor.top;
+    }
+    ordinaryWorkLogAnchorRef.current = undefined;
+  }, [rows, transcriptScrollElementRef]);
   useEffect(() => {
     previousClosuresRef.current = currentClosureIds;
     previousItemsRef.current = items;
@@ -487,6 +506,134 @@ function TranscriptContent({
     }
     setPendingJumpKey(landmark.key);
   };
+  const renderOrdinaryRow = (row: (typeof rows)[number]) => {
+    if (row.kind === 'work-log') return null;
+    if (row.kind === 'tool-stream')
+      return (
+        <TranscriptToolStream
+          key={row.key}
+          items={items.slice(row.start, row.end + 1)}
+          cwd={runtime?.cwd}
+          expanded={open.has(row.key)}
+          timestampOverride={
+            row.start > 0
+              ? transcriptItemTimestamp(items[row.start - 1])
+              : undefined
+          }
+          openToolDetails={openToolDetails}
+          onToolDetailToggle={(key, expanded) =>
+            setOpenToolDetails((current) => {
+              const next = new Set(current);
+              expanded ? next.add(key) : next.delete(key);
+              return next;
+            })
+          }
+          previewStartCount={transcriptPreview.start}
+          previewEndCount={transcriptPreview.end}
+          onToggle={(nextExpanded) => {
+            setOpen((current) => {
+              const next = new Set(current);
+              nextExpanded ? next.add(row.key) : next.delete(row.key);
+              return next;
+            });
+          }}
+        />
+      );
+    const item = items[row.index];
+    if (!item) return null;
+    return (
+      <div data-transcript-key={item.key} key={row.key}>
+        <TranscriptEntry
+          item={item}
+          cwd={runtime?.cwd}
+          branchPoint={
+            item.role === 'user'
+              ? branchPointsByMessageId.get(item.key)
+              : undefined
+          }
+          onOpenBranchPaths={openBranchPaths}
+          toolDetailExpanded={
+            item.tool ? openToolDetails.has(item.key) : undefined
+          }
+          onToolDetailToggle={
+            item.tool
+              ? (expanded) =>
+                  setOpenToolDetails((current) => {
+                    const next = new Set(current);
+                    expanded ? next.add(item.key) : next.delete(item.key);
+                    return next;
+                  })
+              : undefined
+          }
+        />
+      </div>
+    );
+  };
+  const toggleOrdinaryWorkLog = (
+    row: Extract<(typeof rows)[number], { kind: 'work-log' }>,
+  ) => {
+    if (row.expanded && transcriptScrollElementRef?.current) {
+      const scrollElement = transcriptScrollElementRef.current;
+      const header = Array.from(
+        scrollElement.querySelectorAll<HTMLElement>('[data-transcript-key]'),
+      ).find((element) => element.dataset.transcriptKey === row.key);
+      if (header)
+        ordinaryWorkLogAnchorRef.current = {
+          key: row.key,
+          top:
+            header.getBoundingClientRect().top -
+            scrollElement.getBoundingClientRect().top,
+        };
+    }
+    toggleWorkLog(row);
+  };
+  const expandedWorkLogs = rows.filter(
+    (row): row is Extract<(typeof rows)[number], { kind: 'work-log' }> =>
+      row.kind === 'work-log' && row.expanded,
+  );
+  const ordinaryRows = isVirtualizedTranscript
+    ? null
+    : rows.flatMap((row) => {
+        const owner = expandedWorkLogs.find(
+          (workLog) =>
+            row !== workLog &&
+            row.kind !== 'work-log' &&
+            (row.kind === 'entry'
+              ? row.index >= workLog.start && row.index <= workLog.end
+              : row.kind === 'tool-stream' &&
+                row.start >= workLog.start &&
+                row.end <= workLog.end),
+        );
+        if (owner) return [];
+        if (row.kind !== 'work-log') return [renderOrdinaryRow(row)];
+        const children = row.expanded
+          ? rows
+              .filter(
+                (child) =>
+                  child !== row &&
+                  child.kind !== 'work-log' &&
+                  (child.kind === 'entry'
+                    ? child.index >= row.start && child.index <= row.end
+                    : child.kind === 'tool-stream' &&
+                      child.start >= row.start &&
+                      child.end <= row.end),
+              )
+              .map(renderOrdinaryRow)
+          : undefined;
+        return [
+          <TranscriptWorkLog
+            key={row.key}
+            rowKey={row.key}
+            durationMs={row.durationMs}
+            actionCount={row.actionCount}
+            expanded={row.expanded}
+            loading={loadingWorkLogs.has(row.key)}
+            onToggle={() => toggleOrdinaryWorkLog(row)}
+          >
+            {children}
+          </TranscriptWorkLog>,
+        ];
+      });
   if (isVirtualizedTranscript && transcriptScrollElementRef)
     return (
       <VirtualizedTranscript
@@ -524,80 +671,7 @@ function TranscriptContent({
         onJump={jumpToLandmark}
         scrollElementRef={transcriptScrollElementRef}
       />
-      {rows.map((row) => {
-        if (row.kind === 'work-log')
-          return (
-            <TranscriptWorkLog
-              key={row.key}
-              rowKey={row.key}
-              durationMs={row.durationMs}
-              actionCount={row.actionCount}
-              expanded={row.expanded}
-              loading={loadingWorkLogs.has(row.key)}
-              onToggle={() => toggleWorkLog(row)}
-            />
-          );
-        if (row.kind === 'tool-stream')
-          return (
-            <TranscriptToolStream
-              key={row.key}
-              items={items.slice(row.start, row.end + 1)}
-              cwd={runtime?.cwd}
-              expanded={open.has(row.key)}
-              timestampOverride={
-                row.start > 0
-                  ? transcriptItemTimestamp(items[row.start - 1])
-                  : undefined
-              }
-              openToolDetails={openToolDetails}
-              onToolDetailToggle={(key, expanded) =>
-                setOpenToolDetails((current) => {
-                  const next = new Set(current);
-                  expanded ? next.add(key) : next.delete(key);
-                  return next;
-                })
-              }
-              previewStartCount={transcriptPreview.start}
-              previewEndCount={transcriptPreview.end}
-              onToggle={(nextExpanded) => {
-                setOpen((current) => {
-                  const next = new Set(current);
-                  nextExpanded ? next.add(row.key) : next.delete(row.key);
-                  return next;
-                });
-              }}
-            />
-          );
-        const item = items[row.index];
-        if (!item) return null;
-        return (
-          <div data-transcript-key={item.key} key={row.key}>
-            <TranscriptEntry
-              item={item}
-              cwd={runtime?.cwd}
-              branchPoint={
-                item.role === 'user'
-                  ? branchPointsByMessageId.get(item.key)
-                  : undefined
-              }
-              onOpenBranchPaths={openBranchPaths}
-              toolDetailExpanded={
-                item.tool ? openToolDetails.has(item.key) : undefined
-              }
-              onToolDetailToggle={
-                item.tool
-                  ? (expanded) =>
-                      setOpenToolDetails((current) => {
-                        const next = new Set(current);
-                        expanded ? next.add(item.key) : next.delete(item.key);
-                        return next;
-                      })
-                  : undefined
-              }
-            />
-          </div>
-        );
-      })}
+      {ordinaryRows}
       <LiveCompactionEvent runtime={runtime} />
       <LivePauseEvent runtime={runtime} />
     </div>

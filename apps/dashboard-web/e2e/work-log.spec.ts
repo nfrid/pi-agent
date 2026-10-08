@@ -232,6 +232,124 @@ async function installPagedWorkLog(
   return { firstPageRequested, releaseFirstPage };
 }
 
+function stickyWorkLogEntries(
+  interiorCount: number,
+  options: { tallFollowingContent?: boolean; tallToolOutput?: boolean } = {},
+) {
+  const laterText = options.tallFollowingContent
+    ? Array.from({ length: 24 }, (_, index) =>
+        index === 0
+          ? 'Later content after the work log'
+          : `Later content paragraph ${index}`,
+      ).join('\n\n')
+    : 'Later content after the work log';
+  const entries: unknown[] = [
+    {
+      type: 'message',
+      id: 'request',
+      message: {
+        id: 'request',
+        role: 'user',
+        content: [{ type: 'text', text: 'Inspect the long task' }],
+      },
+    },
+  ];
+  const toolCount = options.tallToolOutput ? 24 : 8;
+  for (let index = 0; index < toolCount; index += 1) {
+    entries.push(
+      {
+        type: 'message',
+        id: `call-${index}`,
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: `read-${index}`,
+              name: 'read',
+              arguments: { path: `src/file-${index}.ts` },
+            },
+          ],
+        },
+      },
+      {
+        type: 'message',
+        id: `result-${index}`,
+        message: {
+          role: 'toolResult',
+          toolCallId: `read-${index}`,
+          toolName: 'read',
+          isError: false,
+          content: [
+            {
+              type: 'text',
+              text:
+                options.tallToolOutput && index === 0
+                  ? Array.from(
+                      { length: 80 },
+                      (_, paragraph) =>
+                        `Large tool output paragraph ${paragraph}`,
+                    ).join('\n\n')
+                  : `Read file ${index}`,
+            },
+          ],
+        },
+      },
+    );
+  }
+  for (let index = 0; index < interiorCount; index += 1)
+    entries.push({
+      type: 'message',
+      id: `work-${index}`,
+      message: {
+        id: `work-${index}`,
+        role: 'assistant',
+        content: [{ type: 'text', text: `Work step ${index}` }],
+      },
+    });
+  entries.push(
+    {
+      type: 'message',
+      id: 'answer',
+      message: {
+        id: 'answer',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Long task complete' }],
+      },
+    },
+    {
+      type: 'custom',
+      id: 'closure',
+      customType: 'response-closure',
+      data: {
+        requestMessageId: 'request',
+        finalMessageId: 'answer',
+        startedAt: 1000,
+        endedAt: 91000,
+      },
+    },
+    {
+      type: 'message',
+      id: 'later-request',
+      message: {
+        id: 'later-request',
+        role: 'user',
+        content: [{ type: 'text', text: 'Start the next request' }],
+      },
+    },
+    {
+      type: 'message',
+      id: 'later-content',
+      message: {
+        id: 'later-content',
+        role: 'assistant',
+        content: [{ type: 'text', text: laterText }],
+      },
+    },
+  );
+  return entries;
+}
+
 const messages = (finalText: string) => [
   {
     type: 'message',
@@ -456,6 +574,412 @@ test('virtualized outline jumps open the containing work log and keep its anchor
 });
 
 for (const project of ['mobile', 'desktop']) {
+  test(`expanded work-log headers stack and release at the history end on ${project}${project === 'desktop' ? ' @desktop' : ''}`, async ({
+    page,
+  }) => {
+    await installDashboardBootstrap(
+      page,
+      snapshot(`sticky-work-log-${project}`),
+      {
+        strictApi: true,
+        sessionSnapshot: {
+          entries: stickyWorkLogEntries(22, { tallFollowingContent: true }),
+        },
+      },
+    );
+    await routeLegacySessionReads(page);
+    if (project === 'mobile')
+      await page.setViewportSize({ width: 190, height: 760 });
+    await page.goto('/sessions/session-1');
+    const transcript = page.getByLabel('Transcript', { exact: true });
+    const viewport = page.locator('.session-transcript-scroll');
+    const workLog = transcript.getByRole('button', { name: /Worked for/ });
+    await expect(workLog).toHaveCount(1);
+    await workLog.click();
+    const activityToggle = transcript.getByRole('button', {
+      name: /Show all activity/,
+    });
+    await expect(activityToggle).toBeVisible();
+    await activityToggle.click();
+    const toolDetails = transcript.locator('details.tool-detail');
+    await expect(toolDetails).toHaveCount(8);
+    await toolDetails.last().scrollIntoViewIfNeeded();
+    await viewport.evaluate((element) => {
+      element.scrollTop += 120;
+    });
+    const workLogHeader = transcript.locator('.transcript-work-log');
+    await expect
+      .poll(async () => {
+        const [header, scrollport] = await Promise.all([
+          workLogHeader.boundingBox(),
+          viewport.boundingBox(),
+        ]);
+        return header && scrollport ? Math.abs(header.y - scrollport.y) : 1000;
+      })
+      .toBeLessThan(2);
+    const stacked = await page.evaluate(() => {
+      const work = document.querySelector('.transcript-work-log');
+      const activity = document.querySelector('.tool-stream-meta');
+      if (!work || !activity) return false;
+      return (
+        activity.getBoundingClientRect().top >=
+        work.getBoundingClientRect().bottom - 1
+      );
+    });
+    expect(stacked).toBe(true);
+    if (project === 'mobile') {
+      const headerHeight = await workLogHeader.evaluate(
+        (element) => element.getBoundingClientRect().height,
+      );
+      expect(headerHeight).toBeGreaterThan(28);
+    }
+    const historyScope = transcript.locator('.transcript-work-log-scope');
+    const laterContent = transcript.locator(
+      '[data-transcript-key="later-content"]',
+    );
+    const [scopeBox, scrollportBox] = await Promise.all([
+      historyScope.boundingBox(),
+      viewport.boundingBox(),
+    ]);
+    if (!scopeBox || !scrollportBox)
+      throw new Error('Missing work-log scope or transcript scrollport');
+    await viewport.evaluate(
+      (element, scrollDistance) => {
+        element.scrollTop += scrollDistance;
+      },
+      scopeBox.y + scopeBox.height - scrollportBox.y + 4,
+    );
+    await expect(laterContent).toBeVisible();
+    await expect
+      .poll(async () => {
+        const [scope, header, later, scrollport] = await Promise.all([
+          historyScope.boundingBox(),
+          workLogHeader.boundingBox(),
+          laterContent.boundingBox(),
+          viewport.boundingBox(),
+        ]);
+        return Boolean(
+          scope &&
+            later &&
+            scrollport &&
+            scope.y + scope.height <= scrollport.y + 1 &&
+            (!header ||
+              (header.y + header.height <= scrollport.y + 1 &&
+                (header.y + header.height <= later.y ||
+                  header.y >= later.y + later.height))),
+        );
+      })
+      .toBe(true);
+    await expect(workLog).toHaveCount(1);
+    assertNoUnexpectedDashboardApiRequests(page);
+  });
+
+  test(`collapsing a pinned work log preserves its visible header anchor on ${project}${project === 'desktop' ? ' @desktop' : ''}`, async ({
+    page,
+  }) => {
+    const virtualized = project === 'desktop';
+    await installDashboardBootstrap(
+      page,
+      snapshot(`sticky-collapse-${project}`),
+      {
+        strictApi: true,
+        sessionSnapshot: {
+          entries: stickyWorkLogEntries(virtualized ? 92 : 22),
+        },
+      },
+    );
+    await routeLegacySessionReads(page);
+    if (project === 'mobile')
+      await page.setViewportSize({ width: 190, height: 760 });
+    await page.goto('/sessions/session-1');
+    const transcript = page.getByLabel('Transcript', { exact: true });
+    const viewport = page.locator('.session-transcript-scroll');
+    const workLog = transcript.getByRole('button', { name: /Worked for/ });
+    await workLog.click();
+    if (virtualized) {
+      await viewport.evaluate((element) => {
+        element.scrollTop = element.scrollHeight * 0.45;
+      });
+      await expect(transcript.getByText('Work step 45')).toBeVisible();
+    } else {
+      await transcript.getByText('Work step 15').scrollIntoViewIfNeeded();
+      await viewport.evaluate((element) => {
+        element.scrollTop += 120;
+      });
+    }
+    const header = transcript.locator('.transcript-work-log');
+    const finalAnswer = transcript.getByText('Long task complete', {
+      exact: true,
+    });
+    await expect(header).toBeInViewport();
+    await workLog.click();
+    await expect(workLog).toHaveAttribute('aria-expanded', 'false');
+    await expect(header).toBeInViewport();
+    await expect(finalAnswer).toBeInViewport();
+    assertNoUnexpectedDashboardApiRequests(page);
+  });
+
+  test(`virtualized work-log headers stay pinned near the short tail on ${project}${project === 'desktop' ? ' @desktop' : ''}`, async ({
+    page,
+  }) => {
+    await installDashboardBootstrap(
+      page,
+      snapshot(`sticky-work-log-virtual-${project}`),
+      {
+        strictApi: true,
+        sessionSnapshot: {
+          entries: stickyWorkLogEntries(92, { tallToolOutput: true }),
+        },
+      },
+    );
+    await routeLegacySessionReads(page);
+    if (project === 'mobile')
+      await page.setViewportSize({ width: 190, height: 760 });
+    await page.goto('/sessions/session-1');
+    const transcript = page.getByLabel('Transcript', { exact: true });
+    const viewport = page.locator('.session-transcript-scroll');
+    const workLog = transcript.getByRole('button', { name: /Worked for/ });
+    await expect(workLog).toHaveCount(1);
+    await workLog.click();
+    await viewport.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    const workLogHeader = transcript.locator('.transcript-work-log');
+    await expect(
+      transcript.locator('.transcript-virtual-work-log-header'),
+    ).toHaveCount(1);
+    if (project === 'desktop')
+      await page
+        .getByLabel('Transcript turn map')
+        .getByRole('button', { name: 'Inspect the long task', exact: true })
+        .click();
+    const activityToggle = transcript.getByRole('button', {
+      name: /Show all activity/,
+    });
+    await expect(activityToggle).toBeVisible();
+    await activityToggle.click();
+    const toolDetails = transcript.locator('details.tool-detail');
+    await expect(toolDetails).toHaveCount(24);
+    const activityHeader = transcript.locator('.tool-stream-meta');
+    await toolDetails.first().locator(':scope > summary').click();
+    const toolOutput = toolDetails
+      .first()
+      .locator('.tool-inspector pre')
+      .first();
+    await expect(toolOutput).toBeVisible();
+    await toolOutput.scrollIntoViewIfNeeded();
+    await toolOutput.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await viewport.evaluate((element) => {
+      const header = element.querySelector('.transcript-work-log');
+      if (header)
+        element.scrollTop +=
+          Math.max(
+            0,
+            header.getBoundingClientRect().top -
+              element.getBoundingClientRect().top,
+          ) + 100;
+    });
+    await expect
+      .poll(async () => {
+        const [header, scrollport] = await Promise.all([
+          workLogHeader.boundingBox(),
+          viewport.boundingBox(),
+        ]);
+        return header && scrollport ? Math.abs(header.y - scrollport.y) : 1000;
+      })
+      .toBeLessThan(2);
+    const [outputBox, wheelScrollport] = await Promise.all([
+      toolOutput.boundingBox(),
+      viewport.boundingBox(),
+    ]);
+    if (!outputBox || !wheelScrollport)
+      throw new Error('Missing expanded tool output');
+    const toolRowIndex = await toolOutput.evaluate(
+      (element) => element.closest<HTMLElement>('[data-index]')?.dataset.index,
+    );
+    if (toolRowIndex === undefined)
+      throw new Error('Missing virtualized tool-stream row');
+    await page.mouse.move(
+      outputBox.x + 8,
+      Math.max(outputBox.y + 12, wheelScrollport.y + 150),
+    );
+    const scrollTopBeforeWheel = await viewport.evaluate(
+      (element) => element.scrollTop,
+    );
+    for (let tick = 0; tick < 6; tick += 1) {
+      const beforeTick = await viewport.evaluate(
+        (element) => element.scrollTop,
+      );
+      await page.mouse.wheel(0, 70);
+      await expect
+        .poll(() => viewport.evaluate((element) => element.scrollTop))
+        .toBeGreaterThan(beforeTick);
+      const [header, scrollport, currentRowIndex] = await Promise.all([
+        workLogHeader.boundingBox(),
+        viewport.boundingBox(),
+        toolOutput.evaluate(
+          (element) =>
+            element.closest<HTMLElement>('[data-index]')?.dataset.index,
+        ),
+      ]);
+      expect(currentRowIndex).toBe(toolRowIndex);
+      expect(
+        header && scrollport ? Math.abs(header.y - scrollport.y) : 1000,
+      ).toBeLessThan(2);
+    }
+    expect(
+      await viewport.evaluate((element) => element.scrollTop),
+    ).toBeGreaterThan(scrollTopBeforeWheel + 100);
+    await toolDetails.last().scrollIntoViewIfNeeded();
+    await viewport.evaluate((element) => {
+      element.scrollTop += 120;
+    });
+    await expect
+      .poll(async () => {
+        const [header, work] = await Promise.all([
+          activityHeader.boundingBox(),
+          workLogHeader.boundingBox(),
+        ]);
+        return header && work ? header.y >= work.y + work.height - 1 : false;
+      })
+      .toBe(true);
+    await expect(workLog).toHaveCount(1);
+    if (project === 'mobile') {
+      const headerHeight = await workLogHeader.evaluate(
+        (element) => element.getBoundingClientRect().height,
+      );
+      expect(headerHeight).toBeGreaterThan(28);
+    }
+    const lateWork = transcript.getByText('Work step 90', { exact: true });
+    const finalAnswer = transcript.getByText('Long task complete', {
+      exact: true,
+    });
+    await viewport.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect(finalAnswer).toBeInViewport();
+    const [answerBox, scrollportBox] = await Promise.all([
+      finalAnswer.boundingBox(),
+      viewport.boundingBox(),
+    ]);
+    if (!answerBox || !scrollportBox)
+      throw new Error('Missing final answer or transcript scrollport');
+    await viewport.evaluate(
+      (element, delta) => {
+        element.scrollTop += delta;
+      },
+      answerBox.y - (scrollportBox.y + scrollportBox.height * 0.68),
+    );
+    const lastHistoryRow = transcript.locator(
+      '.transcript-virtual-row[data-transcript-row="work-91"]',
+    );
+    await expect(lastHistoryRow).toBeInViewport();
+    await expect(lateWork).toBeInViewport();
+    await expect(finalAnswer).toBeInViewport();
+    await expect
+      .poll(async () => {
+        const [header, answer, scrollport] = await Promise.all([
+          workLogHeader.boundingBox(),
+          finalAnswer.boundingBox(),
+          viewport.boundingBox(),
+        ]);
+        return Boolean(
+          header &&
+            answer &&
+            scrollport &&
+            Math.abs(header.y - scrollport.y) < 2 &&
+            answer.y >= header.y + header.height,
+        );
+      })
+      .toBe(true);
+    assertNoUnexpectedDashboardApiRequests(page);
+  });
+
+  test(`virtualized work-log headers release after a tall following row on ${project}${project === 'desktop' ? ' @desktop' : ''}`, async ({
+    page,
+  }) => {
+    await installDashboardBootstrap(
+      page,
+      snapshot(`sticky-work-log-release-${project}`),
+      {
+        strictApi: true,
+        sessionSnapshot: {
+          entries: stickyWorkLogEntries(92, { tallFollowingContent: true }),
+        },
+      },
+    );
+    await routeLegacySessionReads(page);
+    if (project === 'mobile')
+      await page.setViewportSize({ width: 190, height: 760 });
+    await page.goto('/sessions/session-1');
+    const transcript = page.getByLabel('Transcript', { exact: true });
+    const viewport = page.locator('.session-transcript-scroll');
+    const workLog = transcript.getByRole('button', { name: /Worked for/ });
+    await expect(workLog).toHaveCount(1);
+    await workLog.click();
+    await viewport.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    const lastHistoryRow = transcript.locator(
+      '.transcript-virtual-row[data-transcript-row="work-91"]',
+    );
+    for (let step = 0; step < 40; step += 1) {
+      if (await lastHistoryRow.count()) break;
+      await viewport.evaluate((element) => {
+        element.scrollTop += element.clientHeight / 2;
+      });
+    }
+    await lastHistoryRow.scrollIntoViewIfNeeded();
+    await expect(lastHistoryRow).toBeInViewport();
+    const historyBounds = transcript.locator(
+      '.transcript-virtual-work-log-bounds',
+    );
+    const [boundsBox, scrollportBox, historyBox, oldScrollTop] =
+      await Promise.all([
+        historyBounds.boundingBox(),
+        viewport.boundingBox(),
+        lastHistoryRow.boundingBox(),
+        viewport.evaluate((element) => element.scrollTop),
+      ]);
+    if (!boundsBox || !scrollportBox || !historyBox)
+      throw new Error('Missing measured work-log history bounds');
+    expect(historyBox.y + historyBox.height).toBeGreaterThan(scrollportBox.y);
+    const scrollDistance = boundsBox.y + boundsBox.height - scrollportBox.y + 4;
+    await viewport.evaluate((element, distance) => {
+      element.scrollTop += distance;
+    }, scrollDistance);
+    expect(
+      await viewport.evaluate((element) => element.scrollTop),
+    ).toBeGreaterThanOrEqual(oldScrollTop + scrollDistance - 2);
+    const laterContent = transcript.locator(
+      '[data-transcript-key="later-content"]',
+    );
+    await expect(laterContent).toBeVisible();
+    await expect
+      .poll(async () => {
+        return viewport.evaluate((element) => {
+          const header = element
+            .querySelector('.transcript-work-log')
+            ?.getBoundingClientRect();
+          const later = element
+            .querySelector('[data-transcript-key="later-content"]')
+            ?.getBoundingClientRect();
+          const scrollport = element.getBoundingClientRect();
+          return Boolean(
+            later &&
+              (!header ||
+                (Math.abs(header.top - scrollport.top) > 2 &&
+                  (header.bottom <= scrollport.top + 1 ||
+                    header.top >= later.bottom))),
+          );
+        });
+      })
+      .toBe(true);
+    assertNoUnexpectedDashboardApiRequests(page);
+  });
+
   test(`codemode children stay peer rows with a provenance prefix on ${project}${project === 'desktop' ? ' @desktop' : ''}`, async ({
     page,
   }) => {

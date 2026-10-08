@@ -96,9 +96,14 @@
 }
 .transcript-thinking[open] > .tool-stream-meta {
   position: sticky;
-  top: 0;
+  top: var(--transcript-work-log-header-offset, 0px);
   z-index: 20;
   background: var(--bg);
+}
+.transcript-work-log-scope-expanded
+  .transcript-thinking[open]
+  > .tool-stream-meta {
+  top: var(--transcript-work-log-header-height, 0px);
 }
 .transcript-thinking-blobs {
   display: grid;
@@ -254,6 +259,13 @@
 .transcript-virtual-row {
   left: 0;
   width: 100%;
+}
+.transcript-virtual-work-log-bounds {
+  pointer-events: none;
+}
+.transcript-virtual-work-log-header {
+  z-index: 26;
+  pointer-events: auto;
 }
 .session-page:not(.session-page-embedded) .transcript-virtual-row {
   left: var(--transcript-content-offset-left);

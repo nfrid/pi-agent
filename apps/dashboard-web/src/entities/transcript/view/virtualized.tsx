@@ -4,8 +4,9 @@ import type {
   SessionBranchTopology,
   SessionOutlineLandmark,
 } from '@pi-dashboard/protocol';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import {
+  type CSSProperties,
   type Dispatch,
   type RefObject,
   type SetStateAction,
@@ -42,6 +43,30 @@ import {
 } from '../virtual-scroll';
 import { TranscriptWorkLog } from '../work-log';
 import { LiveCompactionEvent, LivePauseEvent } from './live-events';
+
+function workLogLastInteriorIndex(
+  rows: readonly VirtualTranscriptRow[],
+  workLogIndex: number,
+): number {
+  const workLog = rows[workLogIndex];
+  if (workLog?.kind !== 'work-log') return -1;
+  for (let index = workLogIndex + 1; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (
+      !row ||
+      row.kind === 'work-log' ||
+      (row.kind === 'entry'
+        ? row.index < workLog.start || row.index > workLog.end
+        : row.start < workLog.start || row.end > workLog.end)
+    )
+      continue;
+    if (
+      row.kind === 'entry' ? row.index === workLog.end : row.end === workLog.end
+    )
+      return index;
+  }
+  return -1;
+}
 
 export function VirtualizedTranscript({
   items,
@@ -102,10 +127,31 @@ export function VirtualizedTranscript({
   );
   const virtualizerRef = useRef<HTMLDivElement>(null);
   const affectedRowKeyRef = useRef<string | undefined>(undefined);
+  const rangeExtractor = useCallback(
+    (range: Parameters<typeof defaultRangeExtractor>[0]) => {
+      const visible = defaultRangeExtractor(range);
+      let activeHeaderIndex = -1;
+      for (let index = 0; index < rows.length; index += 1) {
+        const row = rows[index];
+        if (
+          row?.kind === 'work-log' &&
+          row.expanded &&
+          range.startIndex > index &&
+          range.startIndex <= workLogLastInteriorIndex(rows, index)
+        )
+          activeHeaderIndex = index;
+      }
+      return activeHeaderIndex < 0
+        ? visible
+        : [...new Set([...visible, activeHeaderIndex])].sort((a, b) => a - b);
+    },
+    [rows],
+  );
   const [localPendingJumpKey, setLocalPendingJumpKey] = useState<string>();
   const requestedJumpKey = pendingJumpKey ?? localPendingJumpKey;
   const virtualizer = useVirtualizer({
     count: rows.length,
+    rangeExtractor,
     estimateSize: (index) => (rows[index]?.kind === 'tool-stream' ? 132 : 96),
     overscan: 8,
     getScrollElement: () => scrollElementRef?.current ?? null,
@@ -351,6 +397,22 @@ export function VirtualizedTranscript({
     currentItemKey,
     currentItemIndex,
   );
+  const workLogHeaderOffset = (row: (typeof rows)[number]) => {
+    if (row.kind === 'work-log') return undefined;
+    const itemStart = row.kind === 'entry' ? row.index : row.start;
+    const ownerIndex = rows.findIndex(
+      (candidate) =>
+        candidate.kind === 'work-log' &&
+        candidate.expanded &&
+        itemStart >= candidate.start &&
+        (row.kind === 'entry'
+          ? itemStart <= candidate.end
+          : row.end <= candidate.end),
+    );
+    return ownerIndex < 0
+      ? undefined
+      : virtualItems.find((item) => item.index === ownerIndex)?.size;
+  };
 
   const renderToolStream = (start: number, end: number, streamKey: string) => (
     <TranscriptToolStream
@@ -401,6 +463,56 @@ export function VirtualizedTranscript({
         {virtualItems.map((virtualRow) => {
           const row = rows[virtualRow.index];
           if (!row) return null;
+          if (row.kind === 'work-log' && row.expanded) {
+            const lastInteriorIndex = workLogLastInteriorIndex(
+              rows,
+              virtualRow.index,
+            );
+            const boundaryEnd =
+              lastInteriorIndex >= 0
+                ? virtualizer.measurementsCache[lastInteriorIndex]?.end
+                : undefined;
+            const boundsHeight = Math.max(
+              virtualRow.size,
+              (boundaryEnd ?? virtualRow.end) - virtualRow.start,
+            );
+            return (
+              <div
+                key={virtualRow.key}
+                className="transcript-virtual-work-log-bounds"
+                style={{
+                  position: 'absolute',
+                  top: virtualRow.start,
+                  left: 0,
+                  width: '100%',
+                  height: boundsHeight,
+                }}
+              >
+                <div
+                  data-index={virtualRow.index}
+                  data-transcript-row={row.key}
+                  ref={measureTranscriptElement}
+                  className="transcript-virtual-row transcript-virtual-work-log-header"
+                  style={{ position: 'sticky', top: 0 }}
+                >
+                  <TranscriptWorkLog
+                    rowKey={row.key}
+                    durationMs={row.durationMs}
+                    actionCount={row.actionCount}
+                    expanded
+                    loading={loadingWorkLogs.has(row.key)}
+                    virtualized
+                    onToggle={() => {
+                      captureScrollAnchor(row.key);
+                      affectedRowKeyRef.current = row.key;
+                      onToggleWorkLog(row);
+                    }}
+                  />
+                </div>
+              </div>
+            );
+          }
+          const headerOffset = workLogHeaderOffset(row);
           return (
             <div
               key={virtualRow.key}
@@ -408,10 +520,17 @@ export function VirtualizedTranscript({
               data-transcript-row={row.key}
               ref={measureTranscriptElement}
               className="transcript-virtual-row"
-              style={{
-                position: 'absolute',
-                top: virtualRow.start,
-              }}
+              style={
+                {
+                  position: 'absolute',
+                  top: virtualRow.start,
+                  ...(headerOffset !== undefined
+                    ? {
+                        '--transcript-work-log-header-offset': `${headerOffset}px`,
+                      }
+                    : {}),
+                } as CSSProperties
+              }
             >
               {row.kind === 'tool-stream' ? (
                 renderToolStream(row.start, row.end, row.key)
@@ -422,6 +541,7 @@ export function VirtualizedTranscript({
                   actionCount={row.actionCount}
                   expanded={row.expanded}
                   loading={loadingWorkLogs.has(row.key)}
+                  virtualized
                   onToggle={() => {
                     captureScrollAnchor(row.key);
                     affectedRowKeyRef.current = row.key;
