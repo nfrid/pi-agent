@@ -1308,6 +1308,106 @@ describe('Fastify dashboard route plugin', () => {
     expect(routeContext.stopRuntime).toHaveBeenCalledTimes(2);
   });
 
+  it('forwards generic files through thread create and retry multipart flows', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    routeContext.createThread = vi.fn(async () => ({ accepted: true }));
+    routeContext.retryRun = vi.fn(async () => ({ accepted: true }));
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+    const headers = {
+      origin: 'http://dashboard.test',
+      'x-dashboard-token': 'route-token',
+    };
+    const postForm = async (url: string, form: FormData) => {
+      const request = new Request(`http://dashboard.test${url}`, {
+        method: 'POST',
+        body: form,
+      });
+      return app.inject({
+        method: 'POST',
+        url,
+        headers: {
+          ...headers,
+          'content-type': request.headers.get('content-type') as string,
+        },
+        payload: Buffer.from(await request.arrayBuffer()),
+      });
+    };
+    const create = new FormData();
+    create.set(
+      'command',
+      JSON.stringify({ commandId: 'create-1', title: 'Thread', prompt: '' }),
+    );
+    create.append('files', new Blob([]), 'empty.txt');
+    create.append('images', new Blob(['image']), 'image.png');
+    const created = await postForm('/api/projects/project-1/threads', create);
+    expect(created.statusCode).toBe(202);
+    expect(routeContext.createThread).toHaveBeenCalledWith(
+      'project-1',
+      { commandId: 'create-1', title: 'Thread', prompt: '' },
+      [Buffer.from('image')],
+      [{ name: 'empty.txt', data: Buffer.alloc(0) }],
+    );
+
+    const retry = new FormData();
+    retry.set('command', JSON.stringify({ commandId: 'retry-1', prompt: '' }));
+    retry.append('files', new Blob(['retry']), 'retry.txt');
+    const retried = await postForm('/api/threads/thread-1/retry', retry);
+    expect(retried.statusCode).toBe(202);
+    expect(routeContext.retryRun).toHaveBeenCalledWith(
+      'thread-1',
+      { commandId: 'retry-1', prompt: '' },
+      [],
+      [{ name: 'retry.txt', data: Buffer.from('retry') }],
+    );
+  });
+
+  it('rejects multipart aggregate count and byte-limit violations', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    routeContext.commandRuntime = vi.fn(async () => ({ accepted: true }));
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+    const headers = {
+      origin: 'http://dashboard.test',
+      'x-dashboard-token': 'route-token',
+    };
+    const postForm = async (form: FormData) => {
+      const request = new Request('http://dashboard.test/command', {
+        method: 'POST',
+        body: form,
+      });
+      return app.inject({
+        method: 'POST',
+        url: '/api/runtimes/runtime/command',
+        headers: {
+          ...headers,
+          'content-type': request.headers.get('content-type') as string,
+        },
+        payload: Buffer.from(await request.arrayBuffer()),
+      });
+    };
+    const tooMany = new FormData();
+    tooMany.set('command', JSON.stringify({ type: 'prompt', text: 'files' }));
+    for (let index = 0; index < 5; index += 1)
+      tooMany.append('files', new Blob([]), `file-${index}.txt`);
+    expect((await postForm(tooMany)).statusCode).toBe(400);
+
+    const tooLarge = new FormData();
+    tooLarge.set('command', JSON.stringify({ type: 'prompt', text: 'files' }));
+    const fourMiB = new Uint8Array(4 * 1024 * 1024);
+    for (let index = 0; index < 3; index += 1)
+      tooLarge.append('files', new Blob([fourMiB]), `file-${index}.bin`);
+    tooLarge.append('images', new Blob([new Uint8Array([1])]), 'image.png');
+    const response = await postForm(tooLarge);
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toContain('12 MiB');
+    expect(routeContext.commandRuntime).not.toHaveBeenCalled();
+  });
+
   it('rejects oversized JSON before a route handler while allowing larger multipart commands', async () => {
     const app = Fastify();
     apps.push(app);

@@ -48,6 +48,11 @@ import {
   UsageHistoryResponseSchema,
   usageHistoryPeriod,
 } from '@pi-dashboard/protocol';
+import {
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENT_COUNT,
+  MAX_ATTACHMENT_TOTAL_BYTES,
+} from '@pi-dashboard/protocol/pi-runtime-protocol';
 import type {
   FastifyInstance,
   FastifyPluginAsync,
@@ -217,6 +222,7 @@ export interface DashboardRouteContext {
     runtimeId: string,
     input: unknown,
     images: readonly Buffer[],
+    files?: readonly { name: string; data: Buffer }[],
   ): Promise<unknown>;
   /** Non-multipart browser commands use the typed tRPC receipt boundary. */
   runtimeCommand?(runtimeId: string, command: BridgeCommand): Promise<unknown>;
@@ -241,6 +247,7 @@ export interface DashboardRouteContext {
     projectId: string,
     command: unknown,
     images: readonly Buffer[],
+    files?: readonly { name: string; data: Buffer }[],
   ): Promise<unknown>;
   createExternalThread?(projectId: string, command: unknown): Promise<unknown>;
   gitContext?(projectId: string): Promise<unknown>;
@@ -253,6 +260,7 @@ export interface DashboardRouteContext {
     threadId: string,
     command: unknown,
     images: readonly Buffer[],
+    files?: readonly { name: string; data: Buffer }[],
   ): Promise<unknown>;
   cancelRun?(runId: string, commandId: string): Promise<unknown>;
   reviewCheckout?(checkoutId: string): Promise<unknown>;
@@ -328,9 +336,11 @@ function requireOperation<T extends (...args: never[]) => unknown>(
   return operation;
 }
 
-async function multipartPayload(
-  request: FastifyRequest,
-): Promise<{ body: Record<string, unknown>; images: Buffer[] }> {
+async function multipartPayload(request: FastifyRequest): Promise<{
+  body: Record<string, unknown>;
+  images: Buffer[];
+  files: { name: string; data: Buffer }[];
+}> {
   const raw = request.body;
   if (!Buffer.isBuffer(raw)) throw new Error('Invalid multipart request.');
   const form = await new Response(new Uint8Array(raw), {
@@ -342,13 +352,30 @@ async function multipartPayload(
   const parsed: unknown = JSON.parse(commandPart);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
     throw new Error('Invalid multipart command.');
-  const parts = form.getAll('images');
+  const imageParts = form.getAll('images');
+  const fileParts = form.getAll('files');
+  if (imageParts.length + fileParts.length > MAX_ATTACHMENT_COUNT)
+    throw new Error('Attach no more than four files.');
   const images: Buffer[] = [];
-  for (const part of parts) {
-    if (typeof part === 'string') throw new Error('Invalid image upload.');
-    images.push(Buffer.from(await part.arrayBuffer()));
+  const files: { name: string; data: Buffer }[] = [];
+  let total = 0;
+  for (const [parts, image] of [
+    [imageParts, true],
+    [fileParts, false],
+  ] as const) {
+    for (const part of parts) {
+      if (typeof part === 'string') throw new Error('Invalid file upload.');
+      const data = Buffer.from(await part.arrayBuffer());
+      if (data.length > MAX_ATTACHMENT_BYTES || (image && data.length === 0))
+        throw new Error('Each attachment must be no larger than 5 MiB.');
+      total += data.length;
+      if (total > MAX_ATTACHMENT_TOTAL_BYTES)
+        throw new Error('Attachments exceed the 12 MiB total limit.');
+      if (image) images.push(data);
+      else files.push({ name: part.name, data });
+    }
   }
-  return { body: parsed as Record<string, unknown>, images };
+  return { body: parsed as Record<string, unknown>, images, files };
 }
 
 async function projectIconPayload(request: FastifyRequest): Promise<Buffer> {
@@ -363,14 +390,16 @@ async function projectIconPayload(request: FastifyRequest): Promise<Buffer> {
   return Buffer.from(await icons[0].arrayBuffer());
 }
 
-async function commandPayload(
-  request: FastifyRequest,
-): Promise<{ body: unknown; images: Buffer[] }> {
+async function commandPayload(request: FastifyRequest): Promise<{
+  body: unknown;
+  images: Buffer[];
+  files: { name: string; data: Buffer }[];
+}> {
   if (
     (request.headers['content-type'] ?? '').startsWith('multipart/form-data;')
   )
     return multipartPayload(request);
-  return { body: request.body ?? {}, images: [] };
+  return { body: request.body ?? {}, images: [], files: [] };
 }
 
 function installCorsAndAuth(
@@ -987,8 +1016,12 @@ export const dashboardRoutes: FastifyPluginAsync<{
       try {
         const payload = await commandPayload(request);
         const command = parseThreadCreateCommand(payload.body);
-        if (!command.prompt.trim() && payload.images.length === 0)
-          throw new Error('Thread prompt or an image is required.');
+        if (
+          !command.prompt.trim() &&
+          payload.images.length === 0 &&
+          payload.files.length === 0
+        )
+          throw new Error('Thread prompt or an attachment is required.');
         return reply
           .code(202)
           .send(
@@ -996,6 +1029,7 @@ export const dashboardRoutes: FastifyPluginAsync<{
               request.params.projectId,
               command,
               payload.images,
+              payload.files,
             ),
           );
       } catch (error) {
@@ -1034,9 +1068,10 @@ export const dashboardRoutes: FastifyPluginAsync<{
         if (
           command.prompt !== undefined &&
           !command.prompt.trim() &&
-          payload.images.length === 0
+          payload.images.length === 0 &&
+          payload.files.length === 0
         )
-          throw new Error('Retry prompt or an image is required.');
+          throw new Error('Retry prompt or an attachment is required.');
         return reply
           .code(202)
           .send(
@@ -1044,6 +1079,7 @@ export const dashboardRoutes: FastifyPluginAsync<{
               request.params.threadId,
               command,
               payload.images,
+              payload.files,
             ),
           );
       } catch (error) {
@@ -1292,6 +1328,7 @@ export const dashboardRoutes: FastifyPluginAsync<{
             request.params.runtimeId,
             payload.body,
             payload.images,
+            payload.files,
           ),
         };
       } catch (error) {

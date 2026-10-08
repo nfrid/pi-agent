@@ -2,6 +2,11 @@ export const MAX_ID = 256;
 export const MAX_PATH = 4096;
 /** Maximum UTF-8 bytes returned by an authenticated host-file read. */
 export const MAX_FILE_READ_BYTES = 1024 * 1024;
+/** Limits shared by browser selection and server multipart validation. */
+export const MAX_ATTACHMENT_COUNT = 4;
+export const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+export const MAX_ATTACHMENT_TOTAL_BYTES = 12 * 1024 * 1024;
+export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
 export const MAX_TEXT = 100_000;
 /** External delivery payload limits. */
 export const MAX_EXTERNAL_DELIVERY_ID = 256;

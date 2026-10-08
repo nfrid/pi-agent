@@ -101,6 +101,36 @@ describe('DashboardHttpClient host file reads', () => {
   });
 });
 
+describe('DashboardHttpClient attachment uploads', () => {
+  it('routes native image MIME types to images and other files to files', async () => {
+    const fetch = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response('{}', { status: 200 }),
+    );
+    const client = new DashboardHttpClient({ fetch, tokenStore: tokenStore() });
+    const selected = [
+      new File(['png'], 'photo.png', { type: 'image/png' }),
+      new File(['data'], 'archive.zip', { type: 'application/zip' }),
+      new File(['text'], 'notes.txt', { type: 'text/plain' }),
+    ];
+
+    await client.createThreadWithImages(
+      'project',
+      { commandId: 'create', title: 'Thread', prompt: '' },
+      selected,
+    );
+
+    const form = fetch.mock.calls[0]?.[1]?.body as FormData;
+    expect(form.getAll('images').map((part) => (part as File).name)).toEqual([
+      'photo.png',
+    ]);
+    expect(form.getAll('files').map((part) => (part as File).name)).toEqual([
+      'archive.zip',
+      'notes.txt',
+    ]);
+  });
+});
+
 describe('DashboardHttpClient session images', () => {
   it('requests the dedicated thumbnail variant', async () => {
     const fetch = vi.fn(

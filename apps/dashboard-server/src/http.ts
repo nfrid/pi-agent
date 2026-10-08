@@ -37,6 +37,11 @@ import {
 } from './application/dashboard-application.js';
 import { ExternalDeliveryService } from './application/external-delivery-service.js';
 import { externalModels } from './application/external-models.js';
+import {
+  attachmentManifest,
+  type DashboardFileAttachment,
+  FileAttachmentService,
+} from './application/file-attachment-service.js';
 import type { DashboardImage } from './application/upload-service.js';
 import {
   composerCommandCatalogue,
@@ -208,6 +213,7 @@ export class DashboardServerImpl implements DashboardServer {
   private readonly shellFeed: ShellFeed;
   private readonly sessionFeeds: SessionFeedRegistry;
   private readonly application: DashboardDependencies['application'];
+  private readonly fileAttachments: FileAttachmentService;
   private readonly runtimeProvider: DashboardDependencies['runtimeProvider'];
   private readonly externalDeliveries: ExternalDeliveryService | undefined;
   private readonly serverId = randomBytes(12).toString('base64url');
@@ -252,6 +258,7 @@ export class DashboardServerImpl implements DashboardServer {
     this.shellFeed = dependencies.shellFeed;
     this.sessionFeeds = dependencies.sessionFeeds;
     this.application = dependencies.application;
+    this.fileAttachments = new FileAttachmentService(config.stateDir);
     this.runtimeProvider = dependencies.runtimeProvider;
     this.origins = config.origins;
     const externalOrchestration = this.application.orchestrationService;
@@ -330,6 +337,25 @@ export class DashboardServerImpl implements DashboardServer {
       return await operation(images, release);
     } catch (error) {
       await release();
+      throw error;
+    }
+  }
+
+  private async withFileAttachments<T>(
+    files: readonly { name: string; data: Buffer }[],
+    operation: (
+      saved: readonly DashboardFileAttachment[],
+      handOff: () => void,
+    ) => Promise<T>,
+  ): Promise<T> {
+    const saved = await this.fileAttachments.save(files);
+    let handedOff = false;
+    try {
+      return await operation(saved, () => {
+        handedOff = true;
+      });
+    } catch (error) {
+      if (!handedOff) await this.fileAttachments.cleanup(saved);
       throw error;
     }
   }
@@ -535,12 +561,19 @@ export class DashboardServerImpl implements DashboardServer {
         if (result.status === 'completed') this.changed();
         return result;
       },
-      commandRuntime: async (runtimeId, input, imageBuffers) => {
+      commandRuntime: async (
+        runtimeId,
+        input,
+        imageBuffers,
+        fileBuffers = [],
+      ) => {
         if (!input || typeof input !== 'object' || Array.isArray(input))
           throw new Error('Invalid command body.');
         const body = input as Record<string, unknown>;
-        if ('images' in body)
-          throw new Error('Image paths cannot be supplied by browser clients.');
+        if ('images' in body || 'files' in body)
+          throw new Error(
+            'Attachment paths cannot be supplied by browser clients.',
+          );
         const images =
           imageBuffers.length > 0
             ? await this.application.uploads.save(imageBuffers)
@@ -553,15 +586,35 @@ export class DashboardServerImpl implements DashboardServer {
             throw new Error(
               'This runtime does not support dashboard image attachments; reload it and select an image-capable model.',
             );
-          const command = validateBridgeCommand({
-            ...body,
-            id:
-              typeof body.id === 'string' && body.id.length > 0
-                ? body.id
-                : randomBytes(16).toString('hex'),
-            ...(images.length > 0 ? { images } : {}),
-          });
-          return await this.application.runtime.command(runtimeId, command);
+          return await this.withFileAttachments(
+            fileBuffers,
+            async (files, handOff) => {
+              if (files.length > 0 && typeof body.text !== 'string')
+                throw new Error(
+                  'Files can only be attached to prompt commands.',
+                );
+              if (
+                files.length > 0 &&
+                /^\s*\/[^\s/]+(?:\s|$)/.test(body.text as string)
+              )
+                throw new Error('Files cannot be attached to slash commands.');
+              const command = validateBridgeCommand({
+                ...body,
+                ...(files.length > 0
+                  ? {
+                      text: `${body.text as string}${attachmentManifest(files)}`,
+                    }
+                  : {}),
+                id:
+                  typeof body.id === 'string' && body.id.length > 0
+                    ? body.id
+                    : randomBytes(16).toString('hex'),
+                ...(images.length > 0 ? { images } : {}),
+              });
+              handOff();
+              return this.application.runtime.command(runtimeId, command);
+            },
+          );
         } finally {
           await this.application.uploads.cleanup(
             images.map((image) => image.path),
@@ -606,7 +659,12 @@ export class DashboardServerImpl implements DashboardServer {
           command as Parameters<typeof service.updateProjectDefaultModel>[1],
         );
       },
-      createThread: async (projectId, command, imageBuffers) => {
+      createThread: async (
+        projectId,
+        command,
+        imageBuffers,
+        fileBuffers = [],
+      ) => {
         const service = this.application.orchestrationService;
         if (!service) throw new Error('Orchestration is unavailable.');
         const browserCommand = command as Parameters<
@@ -617,11 +675,15 @@ export class DashboardServerImpl implements DashboardServer {
           : this.application.resolveDraftDefaults(projectId).selection;
         const inherited =
           resolvedDefaults === undefined ? {} : { model: resolvedDefaults };
-        return this.withUploadedImages(imageBuffers, (images, release) =>
-          service.createThread(projectId, {
-            ...browserCommand,
-            ...inherited,
-            ...(images.length > 0 ? { images, releaseImages: release } : {}),
+        return this.withFileAttachments(fileBuffers, (files, handOff) =>
+          this.withUploadedImages(imageBuffers, (images, release) => {
+            handOff();
+            return service.createThread(projectId, {
+              ...browserCommand,
+              prompt: `${browserCommand.prompt}${attachmentManifest(files)}`,
+              ...inherited,
+              ...(images.length > 0 ? { images, releaseImages: release } : {}),
+            });
           }),
         );
       },
@@ -695,16 +757,24 @@ export class DashboardServerImpl implements DashboardServer {
           command as Parameters<typeof service.adoptSession>[2],
         );
       },
-      retryRun: async (threadId, command, imageBuffers) => {
+      retryRun: async (threadId, command, imageBuffers, fileBuffers = []) => {
         const service = this.application.orchestrationService;
         if (!service) throw new Error('Orchestration is unavailable.');
         const browserCommand = command as Parameters<
           typeof service.retryRun
         >[1];
-        return this.withUploadedImages(imageBuffers, (images, release) =>
-          service.retryRun(threadId, {
-            ...browserCommand,
-            ...(images.length > 0 ? { images, releaseImages: release } : {}),
+        return this.withFileAttachments(fileBuffers, (files, handOff) =>
+          this.withUploadedImages(imageBuffers, (images, release) => {
+            handOff();
+            return service.retryRun(threadId, {
+              ...browserCommand,
+              ...(files.length > 0
+                ? {
+                    prompt: `${browserCommand.prompt ?? ''}${attachmentManifest(files)}`,
+                  }
+                : {}),
+              ...(images.length > 0 ? { images, releaseImages: release } : {}),
+            });
           }),
         );
       },
@@ -807,6 +877,7 @@ export class DashboardServerImpl implements DashboardServer {
     try {
       await fs.mkdir(this.stateDir, { recursive: true, mode: 0o700 });
       await this.application.uploads.start();
+      await this.fileAttachments.start();
       await this.bridge.listen(this.socketPath);
       // Keep the HTTP boundary closed until session indexing and watcher
       // installation are complete.

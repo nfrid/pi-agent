@@ -1557,13 +1557,17 @@ describe('dashboard HTTP boundary', () => {
     await expect(server.start()).resolves.toBeUndefined();
   });
 
-  it('forwards authenticated multipart images and removes temporary files after acknowledgement', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-image-'));
+  it('delivers an empty generic file to a non-image runtime and retains it after an uncertain ack', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-file-'));
     server = await createDashboardServer({
       port: 0,
       authToken: 'test-token',
       stateDir: path.join(root, 'state'),
       sessionDir: path.join(root, 'sessions'),
+      registry: new RuntimeRegistry({
+        allowExternalWithoutToken: true,
+        commandTimeoutMs: 20,
+      }),
     });
     await server.start();
     const bridge = net.createConnection(server.socketPath);
@@ -1587,8 +1591,8 @@ describe('dashboard HTTP boundary', () => {
             session: { id: 'image-session', entries: [] },
             model: {
               provider: 'test',
-              model: 'vision',
-              supportsImages: true,
+              model: 'text-only',
+              supportsImages: false,
             },
           },
         },
@@ -1596,7 +1600,12 @@ describe('dashboard HTTP boundary', () => {
     );
     await new Promise((resolve) => setTimeout(resolve, 10));
     let buffered = '';
-    let temporaryPath: string | undefined;
+    let durablePath: string | undefined;
+    let timedOutPath: string | undefined;
+    let timeoutObserved!: () => void;
+    const timeoutSeen = new Promise<void>((resolve) => {
+      timeoutObserved = resolve;
+    });
     const commandSeen = new Promise<void>((resolve, reject) => {
       bridge.on('data', async (chunk) => {
         buffered += chunk.toString('utf8');
@@ -1606,6 +1615,7 @@ describe('dashboard HTTP boundary', () => {
         buffered = buffered.slice(newline + 1);
         const frame = parseFrame(line);
         if (frame.kind !== 'command') return;
+        let acknowledge = true;
         try {
           if (
             frame.command.type !== 'prompt' &&
@@ -1613,44 +1623,36 @@ describe('dashboard HTTP boundary', () => {
             frame.command.type !== 'followUp'
           )
             throw new Error('Expected a prompt command.');
-          temporaryPath = frame.command.images?.[0]?.path;
-          expect(frame.command).toMatchObject({
-            type: 'prompt',
-            text: 'describe this',
-            images: [{ type: 'image', mediaType: 'image/png' }],
-          });
-          expect(temporaryPath).toBeTruthy();
-          await expect(readFile(temporaryPath as string)).resolves.toBeTruthy();
-          expect((await stat(temporaryPath as string)).mode & 0o777).toBe(
-            0o600,
+          if (frame.command.text.includes('timeout request')) {
+            acknowledge = false;
+            timedOutPath = frame.command.text.match(/at "([^"]+)"/)?.[1];
+            timeoutObserved();
+            return;
+          }
+          expect(frame.command.type).toBe('prompt');
+          expect(frame.command.text).not.toContain('describe this');
+          expect(frame.command.images).toBeUndefined();
+          const pathMatch = frame.command.text.match(/at "([^"]+)"/);
+          durablePath = pathMatch?.[1];
+          expect(frame.command.text).toContain('empty.txt');
+          expect(durablePath).toContain(path.join('state', 'file-attachments'));
+          await expect(readFile(durablePath as string)).resolves.toEqual(
+            Buffer.alloc(0),
           );
           resolve();
         } catch (error) {
           reject(error);
         } finally {
-          bridge.write(
-            serializeFrame({ kind: 'ack', id: frame.command.id, ok: true }),
-          );
+          if (acknowledge)
+            bridge.write(
+              serializeFrame({ kind: 'ack', id: frame.command.id, ok: true }),
+            );
         }
       });
     });
     const form = new FormData();
-    form.set(
-      'command',
-      JSON.stringify({ type: 'prompt', text: 'describe this' }),
-    );
-    form.append(
-      'images',
-      new Blob([
-        new Uint8Array(
-          Buffer.from(
-            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
-            'base64',
-          ),
-        ),
-      ]),
-      'sample.png',
-    );
+    form.set('command', JSON.stringify({ type: 'prompt', text: '' }));
+    form.append('files', new Blob([]), 'empty.txt');
     const response = await fetch(
       `http://127.0.0.1:${server.port}/api/runtimes/image-runtime/command`,
       {
@@ -1664,8 +1666,75 @@ describe('dashboard HTTP boundary', () => {
     );
     await commandSeen;
     expect(response.status).toBe(200);
-    expect(temporaryPath).toBeTruthy();
-    await expect(readFile(temporaryPath as string)).rejects.toThrow();
+    await expect(readFile(durablePath as string)).resolves.toEqual(
+      Buffer.alloc(0),
+    );
+    const slashForm = new FormData();
+    slashForm.set(
+      'command',
+      JSON.stringify({ type: 'prompt', text: '/compact' }),
+    );
+    slashForm.append('files', new Blob(['pre-dispatch']), 'rejected.txt');
+    const slashResponse = await fetch(
+      `http://127.0.0.1:${server.port}/api/runtimes/image-runtime/command`,
+      {
+        method: 'POST',
+        headers: {
+          Origin: `http://127.0.0.1:${server.port}`,
+          'x-dashboard-token': 'test-token',
+        },
+        body: slashForm,
+      },
+    );
+    expect(slashResponse.status).toBe(400);
+    expect(await readdir(path.join(root, 'state', 'file-attachments'))).toEqual(
+      [path.basename(durablePath as string)],
+    );
+
+    const timedOutForm = new FormData();
+    timedOutForm.set(
+      'command',
+      JSON.stringify({ type: 'prompt', text: 'timeout request' }),
+    );
+    timedOutForm.append(
+      'files',
+      new Blob(['accepted before timeout']),
+      'retained.txt',
+    );
+    const timedOut = await fetch(
+      `http://127.0.0.1:${server.port}/api/runtimes/image-runtime/command`,
+      {
+        method: 'POST',
+        headers: {
+          Origin: `http://127.0.0.1:${server.port}`,
+          'x-dashboard-token': 'test-token',
+        },
+        body: timedOutForm,
+      },
+    );
+    await timeoutSeen;
+    expect(timedOut.status).toBe(400);
+    expect(timedOutPath).toBeTruthy();
+    await expect(readFile(timedOutPath as string, 'utf8')).resolves.toBe(
+      'accepted before timeout',
+    );
+    const forged = await fetch(
+      `http://127.0.0.1:${server.port}/api/runtimes/image-runtime/command`,
+      {
+        method: 'POST',
+        headers: {
+          Origin: `http://127.0.0.1:${server.port}`,
+          'x-dashboard-token': 'test-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'prompt',
+          text: 'forged',
+          files: [{ path: '/private/file' }],
+        }),
+      },
+    );
+    expect(forged.status).toBe(400);
     bridge.destroy();
   });
 

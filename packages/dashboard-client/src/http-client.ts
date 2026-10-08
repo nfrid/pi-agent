@@ -70,6 +70,7 @@ import {
   type UsageHistoryRange,
   type UsageHistoryResponse,
 } from '@pi-dashboard/protocol';
+import { IMAGE_TYPES } from '@pi-dashboard/protocol/pi-runtime-protocol';
 import {
   browserDashboardTokenStore,
   type DashboardTokenStore,
@@ -329,6 +330,17 @@ function normalizeBaseUrl(value: string): string {
 }
 
 /** Typed, authenticated browser HTTP boundary for dashboard API calls. */
+function appendAttachmentFiles(body: FormData, files: readonly File[]): void {
+  for (const file of files)
+    body.append(
+      IMAGE_TYPES.includes(file.type as (typeof IMAGE_TYPES)[number])
+        ? 'images'
+        : 'files',
+      file,
+      file.name,
+    );
+}
+
 export class DashboardHttpClient {
   readonly baseUrl: string;
   readonly tokenStore: DashboardTokenStore;
@@ -1070,7 +1082,7 @@ export class DashboardHttpClient {
   ): Promise<{ thread: Thread; run: Run; receipt: CommandReceipt }> {
     const body = new FormData();
     body.append('command', JSON.stringify(command));
-    for (const image of images) body.append('images', image, image.name);
+    appendAttachmentFiles(body, images);
     return this.multipart(
       `/api/projects/${encodeURIComponent(projectId)}/threads`,
       body,
@@ -1150,7 +1162,7 @@ export class DashboardHttpClient {
   ): Promise<{ thread: Thread; run: Run; receipt?: CommandReceipt }> {
     const body = new FormData();
     body.append('command', JSON.stringify(command));
-    for (const image of images) body.append('images', image, image.name);
+    appendAttachmentFiles(body, images);
     return this.multipart(
       `/api/threads/${encodeURIComponent(threadId)}/retry`,
       body,
@@ -1375,7 +1387,7 @@ export class DashboardHttpClient {
         ? command
         : { ...command, id: this.newCommandId('dashboard-command') };
     body.append('command', JSON.stringify(withId));
-    for (const image of images) body.append('images', image, image.name);
+    appendAttachmentFiles(body, images);
     return this.multipart(
       `/api/runtimes/${encodeURIComponent(runtimeId)}/command`,
       body,

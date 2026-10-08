@@ -633,6 +633,31 @@ describe('dashboard input dispatch', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
+  it('passes file-reference manifests as ordinary user text', async () => {
+    const sendUserMessage = vi.fn();
+    const pi = {
+      getCommands: () => [],
+      sendUserMessage,
+    } as unknown as ExtensionAPI;
+    const manifest = `
+
+Dashboard file attachments (use these server-generated paths when needed):
+- "empty.txt" (0 bytes), saved as "generated-empty.txt" at "/state/files/generated-empty.txt"`;
+
+    await dispatchDashboardInput(pi, {} as ExtensionContext, manifest);
+    expect(sendUserMessage).toHaveBeenCalledWith(manifest, undefined);
+    await dispatchDashboardInput(
+      pi,
+      {} as ExtensionContext,
+      `/unknown${manifest}`,
+    );
+    expect(sendUserMessage).toHaveBeenNthCalledWith(
+      2,
+      `/unknown${manifest}`,
+      undefined,
+    );
+  });
+
   it('accepts an EOF-terminated frontmatter delimiter', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'pi-prompt-eof-'));
     const file = path.join(directory, 'empty.md');
