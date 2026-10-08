@@ -125,7 +125,16 @@ describe('background terminals extension', () => {
     );
     const guidance = tool?.promptGuidelines?.join('\n');
     expect(guidance).toContain('use ordinary bash for short commands');
-    expect(guidance).toContain('one short waiting notice');
+    expect(guidance).toContain(
+      'at most one brief assistant commentary message',
+    );
+    expect(guidance).toContain('without a `final_answer`');
+    expect(guidance).toContain(
+      'Reserve `final_answer` for substantive answers',
+    );
+    expect(guidance).toContain(
+      'including a real early answer when optional work remains pending',
+    );
     expect(guidance).toContain('kind: "task"');
     expect(guidance).toContain('kind: "service"');
     expect(guidance).toContain('task still waits for process exit');
