@@ -261,12 +261,30 @@ The TanStack Router tree exposes:
 - `/runtimes/:id` — runtime details and controls;
 - `/new` — compatibility redirect into project-scoped launch.
 
-The UI supports launch/restart/stop, prompt/steer/follow-up input, image
+The UI supports launch/restart/stop, prompt/steer/follow-up input, file
 attachments, abort, model and thinking selection, and session rename.
 answer/cancel, workspace refresh, notifications, push subscription, capability
 actions, structured tool inspectors, and a keyboard-first command palette.
 Short transcripts retain normal document flow, while long transcripts are
 virtualized. Activity-group headers are the sole sticky transcript landmark.
+
+### File attachments
+
+The composer accepts any file format through the file picker, drag and drop, or
+file paste. A message can contain up to four attachments, each at most 5 MiB,
+with a combined limit of 12 MiB. Empty non-image files are allowed.
+
+PNG, JPEG, and WebP images retain their native model input and previews and
+require an image-capable model. Other files, including unsupported image
+formats, are available to text-only models as well. The server stores those
+files privately outside the project checkout and supplies their names, sizes,
+and generated paths in the user message. The agent reads them with its normal
+tools; the dashboard does not inline file contents, convert documents, unpack
+archives, or execute uploads.
+
+Non-image attachments remain on disk after delivery and dashboard restart so
+queued messages and resumed sessions can still refer to them. They are not
+removed automatically after a turn and can consume disk space over time.
 
 ### Transcript work logs
 
