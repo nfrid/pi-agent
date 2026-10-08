@@ -22,6 +22,7 @@ type ToolStreamItem = Pick<
   | 'event'
   | 'raw'
   | 'workLogClosure'
+  | 'textPhase'
   | 'codemodeRootKey'
   | 'codemodeDescendants'
 >;
@@ -47,6 +48,7 @@ function isContinuingEvent(item: ToolStreamItem | undefined): boolean {
 function isStreamHistory(item: ToolStreamItem | undefined): boolean {
   return Boolean(
     !item?.workLogClosure &&
+      !item?.textPhase?.hasPhase &&
       (item?.tool || isThinkingOnly(item) || isContinuingEvent(item)),
   );
 }
@@ -79,7 +81,8 @@ export function buildTranscriptToolStreams(
       items[historyStart - 1]?.role === 'assistant' &&
       Boolean(items[historyStart - 1]?.thinking?.length) &&
       !items[historyStart - 1]?.errorMessage &&
-      !items[historyStart - 1]?.workLogClosure;
+      !items[historyStart - 1]?.workLogClosure &&
+      !items[historyStart - 1]?.textPhase?.hasPhase;
     const start = hasPreambleThoughts ? historyStart - 1 : historyStart;
     const key = items[start]?.key ?? `tool-stream-${start}`;
     result.push({ key, start, end: index - 1 });
@@ -121,7 +124,13 @@ export function shouldPreserveWorkLogOnAppend(
 }
 
 export type VirtualTranscriptRow =
-  | { kind: 'entry'; key: string; index: number }
+  | {
+      kind: 'entry';
+      key: string;
+      index: number;
+      text?: string;
+      showThinking?: boolean;
+    }
   | { kind: 'tool-stream'; key: string; start: number; end: number }
   | {
       kind: 'work-log';
@@ -320,15 +329,45 @@ export function buildVirtualTranscriptRows(
     finalIndex,
     partial,
   } of ranges.sort((left, right) => right.requestIndex - left.requestIndex)) {
-    const start = partial ? 0 : requestIndex + 1;
-    const end = finalIndex - 1;
-    if (start > end && !partial) continue;
+    let start = partial ? 0 : requestIndex + 1;
+    let end = finalIndex - 1;
+    const finalMessage = items[finalIndex];
+    const phasedEmptyRange =
+      start > end &&
+      finalMessage?.textPhase?.hasPhase &&
+      (finalMessage.textPhase.fallbackText !== (finalMessage.text ?? '') ||
+        Boolean(finalMessage.thinking?.length));
+    if (start > end && !partial && !phasedEmptyRange) continue;
+    if (phasedEmptyRange) {
+      start = finalIndex;
+      end = finalIndex;
+    }
     const key = `work-log-${closure.finalMessageId}`;
     const expanded = open.has(key);
     const interior = result.filter((row) =>
       row.kind === 'entry'
         ? row.index >= start && row.index <= end
         : row.kind === 'tool-stream' && row.start >= start && row.end <= end,
+    );
+    const markedAnswers = items.flatMap((item, index) =>
+      index >= start &&
+      (index < finalIndex || (phasedEmptyRange && index === finalIndex)) &&
+      item.textPhase?.hasAnswer
+        ? [{ item, index }]
+        : [],
+    );
+    const answerIndexes = new Set(markedAnswers.map(({ index }) => index));
+    if (
+      phasedEmptyRange &&
+      finalMessage &&
+      (finalMessage.textPhase?.fallbackText ||
+        finalMessage.errorMessage ||
+        finalMessage.imageCount)
+    )
+      answerIndexes.add(finalIndex);
+    const finalRow = result.find(
+      (row): row is Extract<VirtualTranscriptRow, { kind: 'entry' }> =>
+        row.kind === 'entry' && row.index === finalIndex,
     );
     const firstInterior = interior[0];
     const insertionRow =
@@ -344,7 +383,35 @@ export function buildVirtualTranscriptRows(
         : undefined);
     if (!insertionRow) continue;
     const insertion = result.indexOf(insertionRow);
-    const hidden = new Set(interior);
+    const hidden = new Set(
+      expanded
+        ? []
+        : interior.filter(
+            (row) => row.kind !== 'entry' || !answerIndexes.has(row.index),
+          ),
+    );
+    if (!expanded) {
+      for (const row of result) {
+        if (row.kind !== 'entry' || row.index < start || row.index > end)
+          continue;
+        const item = items[row.index];
+        if (!item?.textPhase?.hasAnswer) continue;
+        row.text = item.textPhase.answerText;
+        row.showThinking = false;
+      }
+      if (finalMessage?.textPhase?.hasPhase && finalRow) {
+        finalRow.text = finalMessage.textPhase.fallbackText;
+        finalRow.showThinking = false;
+      }
+      if (
+        finalMessage?.textPhase?.hasPhase &&
+        !finalMessage.textPhase.fallbackText &&
+        !finalMessage.errorMessage &&
+        !finalMessage.imageCount &&
+        finalRow
+      )
+        hidden.add(finalRow);
+    }
     result.splice(insertion, 0, {
       kind: 'work-log',
       key,

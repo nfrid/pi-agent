@@ -65,6 +65,824 @@ describe('tool row views and virtual transcript construction', () => {
       endedAt: 90,
     });
   });
+  it('keeps marked answer blocks outside collapsed work while restoring original content when opened', () => {
+    const phase = (id: string, value: 'commentary' | 'final_answer') =>
+      JSON.stringify({ v: 1, id, phase: value });
+    const items = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'request',
+        message: { role: 'user', content: 'Request' },
+      },
+      {
+        type: 'message',
+        id: 'progress',
+        message: { role: 'assistant', content: 'Unphased progress' },
+      },
+      {
+        type: 'message',
+        id: 'main-answer',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'Private thought' },
+            { type: 'toolCall', id: 'tool', name: 'read' },
+            {
+              type: 'text',
+              text: 'Main answer',
+              textSignature: phase('a', 'final_answer'),
+            },
+          ],
+        },
+      },
+      { type: 'tool', id: 'tool', tool: { toolCallId: 'tool', name: 'read' } },
+      {
+        type: 'message',
+        id: 'mixed-answer',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: 'Commentary',
+              textSignature: phase('b', 'commentary'),
+            },
+            {
+              type: 'text',
+              text: 'Addendum',
+              textSignature: phase('c', 'final_answer'),
+            },
+            { type: 'text', text: 'Unphased trailing text' },
+          ],
+        },
+      },
+      {
+        type: 'message',
+        id: 'closure-final',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: 'Later commentary',
+              textSignature: phase('d', 'commentary'),
+            },
+          ],
+        },
+      },
+      {
+        type: 'custom',
+        id: 'closure',
+        customType: 'response-closure',
+        data: {
+          requestMessageId: 'request',
+          finalMessageId: 'closure-final',
+          startedAt: 10,
+          endedAt: 90,
+        },
+      },
+    ]);
+    const closure = items.find(
+      (item) => item.key === 'closure-final',
+    )?.workLogClosure;
+    expect(closure).toBeDefined();
+    if (!closure) return;
+    const collapsed = buildVirtualTranscriptRows(items);
+    const visibleEntries = collapsed.filter(
+      (row): row is Extract<(typeof collapsed)[number], { kind: 'entry' }> =>
+        row.kind === 'entry',
+    );
+    expect(
+      visibleEntries.map((row) => [
+        items[row.index]?.key,
+        row.text,
+        row.showThinking,
+      ]),
+    ).toEqual([
+      ['request', undefined, undefined],
+      ['main-answer', 'Main answer', false],
+      ['mixed-answer', 'Addendum', false],
+    ]);
+    expect(collapsed.some((row) => row.kind === 'work-log')).toBe(true);
+    const expanded = buildVirtualTranscriptRows(
+      items,
+      new Set([`work-log-${closure.finalMessageId}`]),
+    );
+    const expandedIndexes = expanded.flatMap((row) =>
+      row.kind === 'entry'
+        ? [row.index]
+        : row.kind === 'tool-stream'
+          ? Array.from(
+              { length: row.end - row.start + 1 },
+              (_, offset) => row.start + offset,
+            )
+          : [],
+    );
+    expect(expandedIndexes).toEqual(
+      Array.from({ length: items.length }, (_, index) => index).filter(
+        (index) => items[index]?.role || items[index]?.tool,
+      ),
+    );
+    expect(items.find((item) => item.key === 'mixed-answer')?.text).toBe(
+      'Commentary\n\nAddendum\n\nUnphased trailing text',
+    );
+  });
+
+  it('projects only the closing message phases when a closure has no work rows', () => {
+    const phase = (id: string, value: 'commentary' | 'final_answer') =>
+      JSON.stringify({ v: 1, id, phase: value });
+    const mixed = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'request',
+        message: { role: 'user', content: 'Request' },
+      },
+      {
+        type: 'message',
+        id: 'answer',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'Hidden closure thought' },
+            { type: 'text', text: 'Prefix', textSignature: '{bad' },
+            {
+              type: 'text',
+              text: 'Final',
+              textSignature: phase('f', 'final_answer'),
+            },
+            { type: 'text', text: 'Suffix' },
+            {
+              type: 'text',
+              text: 'Commentary',
+              textSignature: phase('c', 'commentary'),
+            },
+          ],
+        },
+      },
+      {
+        type: 'custom',
+        id: 'closure',
+        customType: 'response-closure',
+        data: {
+          requestMessageId: 'request',
+          finalMessageId: 'answer',
+          startedAt: 10,
+          endedAt: 90,
+        },
+      },
+    ]);
+    const answerIndex = mixed.findIndex((item) => item.key === 'answer');
+    const collapsed = buildVirtualTranscriptRows(mixed);
+    const answer = collapsed.find(
+      (row) => row.kind === 'entry' && row.index === answerIndex,
+    );
+    expect(answer).toMatchObject({
+      text: 'Prefix\n\nFinal\n\nSuffix',
+      showThinking: false,
+    });
+    expect(collapsed.some((row) => row.kind === 'work-log')).toBe(true);
+    const expanded = buildVirtualTranscriptRows(
+      mixed,
+      new Set(['work-log-answer']),
+    );
+    expect(
+      expanded.find((row) => row.kind === 'entry' && row.index === answerIndex),
+    ).not.toHaveProperty('text');
+    expect(
+      expanded.find((row) => row.kind === 'entry' && row.index === answerIndex),
+    ).not.toHaveProperty('showThinking');
+
+    const commentaryOnly = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'request',
+        message: { role: 'user', content: 'Request' },
+      },
+      {
+        type: 'message',
+        id: 'answer',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: '### Progress',
+              textSignature: phase('c', 'commentary'),
+            },
+          ],
+        },
+      },
+      {
+        type: 'custom',
+        id: 'closure',
+        customType: 'response-closure',
+        data: {
+          requestMessageId: 'request',
+          finalMessageId: 'answer',
+          startedAt: 10,
+          endedAt: 90,
+        },
+      },
+    ]);
+    expect(commentaryOnly.find((item) => item.key === 'answer')).toBeDefined();
+    const commentaryRows = buildVirtualTranscriptRows(commentaryOnly);
+    expect(commentaryRows.some((row) => row.kind === 'work-log')).toBe(true);
+    expect(
+      commentaryRows.some(
+        (row) =>
+          row.kind === 'entry' && commentaryOnly[row.index]?.key === 'answer',
+      ),
+    ).toBe(false);
+
+    const headingAnswer = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'heading-answer',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: '**Done**',
+              textSignature: phase('a', 'final_answer'),
+            },
+          ],
+        },
+      },
+    ]);
+    expect(headingAnswer[0]?.text).toBe('**Done**');
+    const unphased = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'request',
+        message: { role: 'user', content: 'Request' },
+      },
+      {
+        type: 'message',
+        id: 'answer',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Unphased closing answer' },
+            { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' },
+          ],
+          stopReason: 'error',
+          errorMessage: 'Failed',
+        },
+      },
+      {
+        type: 'custom',
+        id: 'closure',
+        customType: 'response-closure',
+        data: {
+          requestMessageId: 'request',
+          finalMessageId: 'answer',
+          startedAt: 10,
+          endedAt: 90,
+        },
+      },
+    ]);
+    expect(
+      buildVirtualTranscriptRows(unphased).some(
+        (row) => row.kind === 'work-log',
+      ),
+    ).toBe(false);
+    expect(
+      buildVirtualTranscriptRows(unphased).some(
+        (row) => row.kind === 'entry' && unphased[row.index]?.key === 'answer',
+      ),
+    ).toBe(true);
+    expect(unphased.find((item) => item.key === 'answer')).toMatchObject({
+      text: 'Unphased closing answer',
+      imageCount: 1,
+      errorMessage: 'Failed',
+    });
+    const unphasedAfterAnswer = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'request',
+        message: { role: 'user', content: 'Request' },
+      },
+      {
+        type: 'message',
+        id: 'marked-answer',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: 'Earlier answer',
+              textSignature: phase('earlier', 'final_answer'),
+            },
+          ],
+        },
+      },
+      {
+        type: 'message',
+        id: 'unphased-final',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Legacy final' },
+            { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' },
+          ],
+          stopReason: 'error',
+          errorMessage: 'Legacy failure',
+        },
+      },
+      {
+        type: 'custom',
+        id: 'closure',
+        customType: 'response-closure',
+        data: {
+          requestMessageId: 'request',
+          finalMessageId: 'unphased-final',
+          startedAt: 10,
+          endedAt: 90,
+        },
+      },
+    ]);
+    const unphasedAfterAnswerRows =
+      buildVirtualTranscriptRows(unphasedAfterAnswer);
+    expect(
+      unphasedAfterAnswerRows.some(
+        (row) =>
+          row.kind === 'entry' &&
+          unphasedAfterAnswer[row.index]?.key === 'marked-answer',
+      ),
+    ).toBe(true);
+    expect(
+      unphasedAfterAnswerRows.some(
+        (row) =>
+          row.kind === 'entry' &&
+          unphasedAfterAnswer[row.index]?.key === 'unphased-final',
+      ),
+    ).toBe(true);
+    expect(
+      unphasedAfterAnswer.find((item) => item.key === 'unphased-final'),
+    ).toMatchObject({
+      text: 'Legacy final',
+      imageCount: 1,
+      errorMessage: 'Legacy failure',
+    });
+  });
+
+  it('keeps unknown text, errors and images in a phased closing reply with no earlier work', () => {
+    const commentary = {
+      type: 'text',
+      text: '### Progress',
+      textSignature: JSON.stringify({
+        v: 1,
+        id: 'progress',
+        phase: 'commentary',
+      }),
+    };
+    for (const example of [
+      {
+        content: [
+          { type: 'text', text: 'Unknown prefix' },
+          commentary,
+          { type: 'text', text: 'Unknown suffix' },
+        ],
+        extra: {},
+        text: 'Unknown prefix\n\nUnknown suffix',
+      },
+      {
+        content: [commentary],
+        extra: { stopReason: 'error', errorMessage: 'Visible failure' },
+        text: '',
+      },
+      {
+        content: [
+          commentary,
+          { type: 'image', mimeType: 'image/png', data: 'AQID' },
+        ],
+        extra: {},
+        text: '',
+      },
+    ]) {
+      const items = toTranscriptEntries([
+        {
+          type: 'message',
+          id: 'request',
+          message: { role: 'user', content: 'Request' },
+        },
+        {
+          type: 'message',
+          id: 'answer',
+          message: {
+            role: 'assistant',
+            content: example.content,
+            ...example.extra,
+          },
+        },
+        {
+          type: 'custom',
+          id: 'closure',
+          customType: 'response-closure',
+          data: {
+            requestMessageId: 'request',
+            finalMessageId: 'answer',
+            startedAt: 10,
+            endedAt: 90,
+          },
+        },
+      ]);
+      const rows = buildVirtualTranscriptRows(items);
+      const answer = rows.find(
+        (row) => row.kind === 'entry' && items[row.index]?.key === 'answer',
+      );
+      expect(answer).toMatchObject({ text: example.text, showThinking: false });
+      expect(rows.some((row) => row.kind === 'work-log')).toBe(true);
+      expect(items.find((item) => item.key === 'answer')?.text).toContain(
+        '### Progress',
+      );
+    }
+  });
+
+  it('does not add an empty disclosure for an answer-only phased reply', () => {
+    const items = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'request',
+        message: { role: 'user', content: 'Request' },
+      },
+      {
+        type: 'message',
+        id: 'answer',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: 'Answer',
+              textSignature: JSON.stringify({
+                v: 1,
+                id: 'answer',
+                phase: 'final_answer',
+              }),
+            },
+          ],
+        },
+      },
+      {
+        type: 'custom',
+        id: 'closure',
+        customType: 'response-closure',
+        data: {
+          requestMessageId: 'request',
+          finalMessageId: 'answer',
+          startedAt: 10,
+          endedAt: 90,
+        },
+      },
+    ]);
+    const rows = buildVirtualTranscriptRows(items);
+    expect(rows.map((row) => row.key)).toEqual(['request', 'answer']);
+    expect(rows.some((row) => row.kind === 'work-log')).toBe(false);
+  });
+
+  it('hides a commentary-only closing reply even when it carries thinking', () => {
+    const items = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'request',
+        message: { role: 'user', content: 'Request' },
+      },
+      {
+        type: 'message',
+        id: 'work',
+        message: { role: 'assistant', content: 'Earlier work' },
+      },
+      {
+        type: 'message',
+        id: 'answer',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'Hidden thought' },
+            {
+              type: 'text',
+              text: 'Waiting',
+              textSignature: JSON.stringify({
+                v: 1,
+                id: 'waiting',
+                phase: 'commentary',
+              }),
+            },
+          ],
+        },
+      },
+      {
+        type: 'custom',
+        id: 'closure',
+        customType: 'response-closure',
+        data: {
+          requestMessageId: 'request',
+          finalMessageId: 'answer',
+          startedAt: 10,
+          endedAt: 90,
+        },
+      },
+    ]);
+    const rows = buildVirtualTranscriptRows(items);
+    expect(
+      rows.some(
+        (row) => row.kind === 'entry' && items[row.index]?.key === 'answer',
+      ),
+    ).toBe(false);
+    const expanded = buildVirtualTranscriptRows(
+      items,
+      new Set(['work-log-answer']),
+    );
+    expect(
+      expanded.some(
+        (row) => row.kind === 'entry' && items[row.index]?.key === 'answer',
+      ),
+    ).toBe(true);
+  });
+
+  it('limits phase overrides to the collapsed closure range', () => {
+    const phase = (id: string, value: 'commentary' | 'final_answer') =>
+      JSON.stringify({ v: 1, id, phase: value });
+    const messages: unknown[] = [];
+    const addRequest = (id: string) =>
+      messages.push({
+        type: 'message',
+        id,
+        message: { role: 'user', content: id },
+      });
+    const addAnswer = (id: string, content: unknown[], close: boolean) => {
+      messages.push({
+        type: 'message',
+        id,
+        message: { role: 'assistant', content },
+      });
+      if (close)
+        messages.push({
+          type: 'custom',
+          id: `${id}-closure`,
+          customType: 'response-closure',
+          data: {
+            requestMessageId: `request-${id}`,
+            finalMessageId: id,
+            startedAt: 10,
+            endedAt: 90,
+          },
+        });
+    };
+    addRequest('request-one');
+    addAnswer(
+      'one',
+      [
+        {
+          type: 'text',
+          text: 'One answer',
+          textSignature: phase('1', 'final_answer'),
+        },
+      ],
+      true,
+    );
+    addRequest('request-two');
+    addAnswer(
+      'two',
+      [
+        { type: 'text', text: 'Prefix', textSignature: '{bad' },
+        {
+          type: 'text',
+          text: 'Two answer',
+          textSignature: phase('2', 'final_answer'),
+        },
+        { type: 'text', text: 'Suffix' },
+        {
+          type: 'text',
+          text: 'Commentary',
+          textSignature: phase('3', 'commentary'),
+        },
+      ],
+      true,
+    );
+    addRequest('request-three');
+    addAnswer(
+      'open-reply',
+      [
+        {
+          type: 'text',
+          text: 'Open commentary',
+          textSignature: phase('4', 'commentary'),
+        },
+        {
+          type: 'text',
+          text: 'Open answer',
+          textSignature: phase('5', 'final_answer'),
+        },
+      ],
+      false,
+    );
+    const items = toTranscriptEntries(messages);
+    const firstExpanded = buildVirtualTranscriptRows(
+      items,
+      new Set(['work-log-one']),
+    );
+    expect(
+      firstExpanded.find(
+        (row) => row.kind === 'entry' && items[row.index]?.key === 'one',
+      ),
+    ).not.toHaveProperty('text');
+    const collapsedSecond = buildVirtualTranscriptRows(
+      items,
+      new Set(['work-log-one']),
+    );
+    expect(
+      collapsedSecond.find(
+        (row) => row.kind === 'entry' && items[row.index]?.key === 'two',
+      ),
+    ).toMatchObject({
+      text: 'Prefix\n\nTwo answer\n\nSuffix',
+      showThinking: false,
+    });
+    expect(
+      collapsedSecond.find(
+        (row) => row.kind === 'entry' && items[row.index]?.key === 'open-reply',
+      ),
+    ).not.toHaveProperty('text');
+  });
+
+  it('treats malformed and unknown text signatures as absent', () => {
+    const [invalid, unknown] = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'invalid',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Invalid phase', textSignature: '{bad' },
+          ],
+        },
+      },
+      {
+        type: 'message',
+        id: 'unknown',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: 'Unknown version',
+              textSignature: JSON.stringify({
+                v: 2,
+                id: 'x',
+                phase: 'final_answer',
+              }),
+            },
+          ],
+        },
+      },
+    ]);
+    expect(invalid?.textPhase).toBeUndefined();
+    expect(unknown?.textPhase).toBeUndefined();
+    expect(invalid?.text).toBe('Invalid phase');
+    expect(unknown?.text).toBe('Unknown version');
+    const fallback = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'request',
+        message: { role: 'user', content: 'Request' },
+      },
+      {
+        type: 'message',
+        id: 'work',
+        message: { role: 'assistant', content: 'Hidden work' },
+      },
+      {
+        type: 'message',
+        id: 'final',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Fallback answer', textSignature: '{bad' },
+          ],
+        },
+      },
+      {
+        type: 'custom',
+        id: 'closure',
+        customType: 'response-closure',
+        data: {
+          requestMessageId: 'request',
+          finalMessageId: 'final',
+          startedAt: 10,
+          endedAt: 90,
+        },
+      },
+    ]);
+    const fallbackRows = buildVirtualTranscriptRows(fallback);
+    expect(
+      fallbackRows.some(
+        (row) => row.kind === 'entry' && fallback[row.index]?.key === 'final',
+      ),
+    ).toBe(true);
+    expect(
+      fallbackRows.some(
+        (row) => row.kind === 'entry' && fallback[row.index]?.key === 'work',
+      ),
+    ).toBe(false);
+  });
+
+  it('reconciles a completed live answer with its hydrated history entry', () => {
+    const signature = JSON.stringify({
+      v: 1,
+      id: 'answer',
+      phase: 'final_answer',
+    });
+    const closure = {
+      id: 'closure',
+      type: 'custom' as const,
+      customType: 'response-closure' as const,
+      data: {
+        requestMessageId: 'request',
+        finalMessageId: 'answer',
+        startedAt: 10,
+        endedAt: 90,
+      },
+    };
+    let live = hydrateTranscript(
+      [
+        {
+          type: 'message',
+          id: 'request',
+          message: { role: 'user', content: 'Request' },
+        },
+      ],
+      's1',
+    );
+    live = reduceTranscriptEvent(live, {
+      type: 'message.started',
+      sessionId: 's1',
+      message: {
+        messageId: 'answer',
+        role: 'assistant',
+        content: [{ type: 'text', text: '**Done**' }],
+      },
+    });
+    expect(
+      toTranscriptEntries(live).some((item) => item.key === 'answer'),
+    ).toBe(false);
+    live = reduceTranscriptEvent(live, {
+      type: 'message.finished',
+      sessionId: 's1',
+      message: {
+        messageId: 'answer',
+        role: 'assistant',
+        content: [{ type: 'text', text: '**Done**', textSignature: signature }],
+      },
+    });
+    live = reduceTranscriptEvent(live, {
+      type: 'agent.settled',
+      sessionId: 's1',
+      closure,
+    });
+    const liveItems = toTranscriptEntries(live);
+    const historyItems = toTranscriptEntries(
+      hydrateTranscript(
+        [
+          {
+            type: 'message',
+            id: 'request',
+            message: { role: 'user', content: 'Request' },
+          },
+          {
+            type: 'message',
+            id: 'answer',
+            message: {
+              role: 'assistant',
+              content: [
+                { type: 'text', text: '**Done**', textSignature: signature },
+              ],
+            },
+          },
+          closure,
+        ],
+        's1',
+      ),
+    );
+    expect(liveItems.find((item) => item.key === 'answer')).toMatchObject({
+      text: '**Done**',
+      textPhase: { hasAnswer: true },
+      workLogClosure: closure.data,
+    });
+    expect(historyItems.find((item) => item.key === 'answer')).toMatchObject({
+      text: '**Done**',
+      textPhase: { hasAnswer: true },
+      workLogClosure: closure.data,
+    });
+    expect(
+      buildVirtualTranscriptRows(liveItems).some(
+        (row) => row.kind === 'entry' && liveItems[row.index]?.key === 'answer',
+      ),
+    ).toBe(true);
+  });
+
   it('keeps only an unambiguous valid partial closure from the exact outline request', () => {
     const source = [
       {

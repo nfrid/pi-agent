@@ -551,7 +551,12 @@ export function VirtualizedTranscript({
               ) : (
                 <div data-transcript-key={items[row.index]?.key}>
                   <TranscriptEntry
-                    item={items[row.index]}
+                    item={
+                      row.text === undefined
+                        ? items[row.index]
+                        : { ...items[row.index], text: row.text }
+                    }
+                    showThinking={row.showThinking ?? true}
                     cwd={runtime?.cwd}
                     branchPoint={
                       items[row.index]?.role === 'user'

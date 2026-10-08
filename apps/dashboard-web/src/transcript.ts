@@ -102,6 +102,13 @@ export interface TranscriptModelItem {
   errorMessage?: string;
   /** Hidden response-lifecycle metadata consumed by transcript row planning. */
   workLogClosure?: ResponseClosure;
+  /** Native Responses text phases, parsed once from the persisted content. */
+  textPhase?: {
+    answerText: string;
+    fallbackText: string;
+    hasAnswer: boolean;
+    hasPhase: boolean;
+  };
   /** Feature-owned replacement rendered in the normal transcript flow. */
   customMessage?: ReactNode;
   /** Optional outline presentation without changing transcript semantics. */
@@ -184,6 +191,51 @@ function messageText(content: unknown): string {
   if (Array.isArray(content))
     return content.map(contentText).filter(Boolean).join('\n\n').trim();
   return contentText(content).trim();
+}
+
+function responseTextPhase(content: unknown): TranscriptModelItem['textPhase'] {
+  if (!Array.isArray(content)) return undefined;
+  const answers: string[] = [];
+  const fallback: string[] = [];
+  let hasPhase = false;
+  for (const value of content) {
+    const part = record(value);
+    if (part?.type !== 'text' || typeof part.text !== 'string') continue;
+    const signature = stringField(part, 'textSignature');
+    if (!signature) {
+      fallback.push(part.text);
+      continue;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(signature);
+    } catch {
+      fallback.push(part.text);
+      continue;
+    }
+    const phase = record(parsed);
+    if (
+      phase?.v !== 1 ||
+      typeof phase.id !== 'string' ||
+      (phase.phase !== 'commentary' && phase.phase !== 'final_answer')
+    ) {
+      fallback.push(part.text);
+      continue;
+    }
+    hasPhase = true;
+    if (phase.phase === 'final_answer') {
+      answers.push(part.text);
+      fallback.push(part.text);
+    }
+  }
+  return hasPhase
+    ? {
+        answerText: answers.join('\n\n').trim(),
+        fallbackText: fallback.join('\n\n').trim(),
+        hasAnswer: answers.length > 0,
+        hasPhase,
+      }
+    : undefined;
 }
 
 function messageThinking(content: unknown): string[] {
@@ -799,6 +851,7 @@ export function toTranscriptEntries(
       continue;
     }
     const text = messageText(item.content);
+    const textPhase = responseTextPhase(item.content);
     const thinking = messageThinking(item.content);
     const images = messageImages(item.content);
     const imageCount = images.length;
@@ -826,12 +879,15 @@ export function toTranscriptEntries(
     }
     const failed = item.stopReason === 'error';
     const visibleText =
-      text && (failed || !isNarration(text)) ? text : undefined;
+      text && (failed || !isNarration(text) || textPhase?.hasPhase)
+        ? text
+        : undefined;
     const errorMessage = failed
       ? item.errorMessage?.trim() || 'Unknown error'
       : undefined;
     if (
       !visibleText &&
+      !textPhase?.hasPhase &&
       thinking.length === 0 &&
       imageCount === 0 &&
       !errorMessage
@@ -856,6 +912,7 @@ export function toTranscriptEntries(
       ...(sessionId ? { sessionId } : {}),
       ...(imageCount > 0 ? { imageCount, images } : {}),
       ...(item.preparing ? { preparing: true } : {}),
+      ...(textPhase ? { textPhase } : {}),
     });
   }
   const conflictedFinalKeys = new Set(

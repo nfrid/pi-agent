@@ -544,7 +544,8 @@ function TranscriptContent({
     return (
       <div data-transcript-key={item.key} key={row.key}>
         <TranscriptEntry
-          item={item}
+          item={row.text === undefined ? item : { ...item, text: row.text }}
+          showThinking={row.showThinking ?? true}
           cwd={runtime?.cwd}
           branchPoint={
             item.role === 'user'

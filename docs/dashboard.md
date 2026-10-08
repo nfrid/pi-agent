@@ -294,8 +294,13 @@ Codemode remains a visible `Codemode` call, while its children are peer rows mar
 with a `↳` prefix. Their results pass through the script rather than going directly
 to the agent; the script and selected output remain available in the root inspector.
 
-An exact persisted `response-closure` marker enables a compact **Work log** between
-the ordinary user request and the final assistant answer. It shows elapsed wall-clock
+An exact persisted `response-closure` marker identifies the closing assistant message
+and bounds a compact **Work log** after the request. It does not select the answer.
+Marked OpenAI Responses `final_answer` text blocks remain visible in order, while
+commentary stays in the disclosed work log. Mixed messages show only selected answer
+text while collapsed, and later marked answers remain visible after optional work.
+The closing message retains the existing full-message fallback when its phase is absent
+or invalid, and pagination remains lazy. The work log shows elapsed wall-clock
 time, including background waits, and an action count that excludes codemode wrappers
 when their child actions are known. Steering stays inside the work log; ordinary
 follow-up requests do not. Invalid, conflicting, or ambiguous boundaries leave the

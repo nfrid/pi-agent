@@ -84,6 +84,7 @@ async function installPagedWorkLog(
     interiorCount?: number;
     gateFirstPage?: boolean;
     failFirstPage?: boolean;
+    markedEarlierAnswer?: boolean;
   } = {},
 ) {
   const metadata = snapshot('work-log-paged').sessions[0];
@@ -174,14 +175,37 @@ async function installPagedWorkLog(
         contentType: 'application/json',
         body: trpcData({
           ...latest,
-          entries: Array.from({ length: 4 }, (_, index) => ({
-            type: 'message',
-            id: `older-${index + 4}`,
-            message: {
-              role: 'assistant',
-              content: [{ type: 'text', text: `Older item ${index + 4}` }],
-            },
-          })),
+          entries: Array.from({ length: 4 }, (_, index) =>
+            options.markedEarlierAnswer && index === 2
+              ? {
+                  type: 'message',
+                  id: 'older-answer',
+                  message: {
+                    role: 'assistant',
+                    content: [
+                      {
+                        type: 'text',
+                        text: 'Earlier marked answer',
+                        textSignature: JSON.stringify({
+                          v: 1,
+                          id: 'earlier',
+                          phase: 'final_answer',
+                        }),
+                      },
+                    ],
+                  },
+                }
+              : {
+                  type: 'message',
+                  id: `older-${index + 4}`,
+                  message: {
+                    role: 'assistant',
+                    content: [
+                      { type: 'text', text: `Older item ${index + 4}` },
+                    ],
+                  },
+                },
+          ),
           history: {
             version: 1,
             start: 4,
@@ -416,6 +440,24 @@ test('an incomplete work log fetches only through its request when opened', asyn
   await expect(page.getByText('Work item 0', { exact: true })).toBeVisible();
   await expect(page.getByText('Paged work is done')).toBeVisible();
   expect(cursors).toEqual(['older-8', 'older-4']);
+  assertNoUnexpectedDashboardApiRequests(page);
+});
+
+test('a partial work log retains a marked answer after its history page is prepended', async ({
+  page,
+}) => {
+  await installPagedWorkLog(page, { markedEarlierAnswer: true });
+  await page.goto('/sessions/session-1');
+  const transcript = page.getByLabel('Transcript', { exact: true });
+  const workLog = transcript.getByRole('button', { name: /Worked for/ });
+  await expect(workLog).toBeVisible();
+  await workLog.click();
+  await expect(
+    transcript.getByText('Earlier marked answer', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    transcript.getByText('Older item 4', { exact: true }),
+  ).toBeVisible();
   assertNoUnexpectedDashboardApiRequests(page);
 });
 
@@ -1074,6 +1116,238 @@ for (const project of ['mobile', 'desktop']) {
     await expect(
       calls.first().getByText('Script output', { exact: true }),
     ).toBeVisible();
+    assertNoUnexpectedDashboardApiRequests(page);
+  });
+
+  test(`response phases preserve answers outside collapsed work on ${project}${project === 'desktop' ? ' @desktop' : ''}`, async ({
+    page,
+  }) => {
+    const signature = (id: string, phase: 'commentary' | 'final_answer') =>
+      JSON.stringify({ v: 1, id, phase });
+    const entries = [
+      {
+        type: 'message',
+        id: 'request',
+        message: { id: 'request', role: 'user', content: 'Inspect this' },
+      },
+      {
+        type: 'message',
+        id: 'progress',
+        message: {
+          id: 'progress',
+          role: 'assistant',
+          content: 'Hidden progress',
+        },
+      },
+      {
+        type: 'message',
+        id: 'main',
+        message: {
+          id: 'main',
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'Private answer thought' },
+            { type: 'toolCall', id: 'call', name: 'read' },
+            {
+              type: 'text',
+              text: 'Main answer',
+              textSignature: signature('main', 'final_answer'),
+            },
+          ],
+        },
+      },
+      {
+        type: 'tool',
+        id: 'tool',
+        tool: {
+          toolCallId: 'call',
+          name: 'read',
+          arguments: {},
+          result: 'Hidden tool result',
+          status: 'completed',
+        },
+      },
+      {
+        type: 'message',
+        id: 'addendum',
+        message: {
+          id: 'addendum',
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: 'Hidden commentary',
+              textSignature: signature('commentary', 'commentary'),
+            },
+            {
+              type: 'text',
+              text: 'Later answer',
+              textSignature: signature('later', 'final_answer'),
+            },
+          ],
+        },
+      },
+      {
+        type: 'message',
+        id: 'closure-final',
+        message: {
+          id: 'closure-final',
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: 'Closure commentary',
+              textSignature: signature('closure', 'commentary'),
+            },
+          ],
+        },
+      },
+      {
+        type: 'custom',
+        id: 'closure',
+        customType: 'response-closure',
+        data: {
+          requestMessageId: 'request',
+          finalMessageId: 'closure-final',
+          startedAt: 1000,
+          endedAt: 91000,
+        },
+      },
+    ];
+    await installDashboardBootstrap(
+      page,
+      snapshot(`work-log-phases-${project}`),
+      {
+        strictApi: true,
+        sessionSnapshot: { entries },
+      },
+    );
+    await routeLegacySessionReads(page);
+    await page.goto('/sessions/session-1');
+    const transcript = page.getByLabel('Transcript', { exact: true });
+    await expect(
+      transcript.getByText('Main answer', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      transcript.getByText('Later answer', { exact: true }),
+    ).toBeVisible();
+    for (const hidden of [
+      'Hidden progress',
+      'Hidden tool result',
+      'Hidden commentary',
+      'Closure commentary',
+      'Private answer thought',
+    ])
+      await expect(transcript.getByText(hidden, { exact: true })).toHaveCount(
+        0,
+      );
+    const workLog = transcript.getByRole('button', { name: /Worked for/ });
+    await workLog.click();
+    const text = await transcript
+      .locator('.message-assistant')
+      .allTextContents();
+    expect(text.join(' ')).toContain('Hidden progress');
+    expect(text.join(' ')).toContain('Hidden commentary');
+    expect(text.join(' ')).toContain('Closure commentary');
+    expect(text.join(' ')).toContain('Main answer');
+    await expect(
+      transcript.getByText('Private answer thought', { exact: true }),
+    ).toBeVisible();
+    expect(text.join(' ')).toContain('Later answer');
+    assertNoUnexpectedDashboardApiRequests(page);
+  });
+
+  test(`virtualized work logs retain every marked answer on ${project}${project === 'desktop' ? ' @desktop' : ''}`, async ({
+    page,
+  }) => {
+    const phase = (id: string) =>
+      JSON.stringify({ v: 1, id, phase: 'final_answer' });
+    const entries = [
+      {
+        type: 'message',
+        id: 'request',
+        message: { id: 'request', role: 'user', content: 'Inspect this' },
+      },
+      ...Array.from({ length: 82 }, (_, index) => ({
+        type: 'message',
+        id: `progress-${index}`,
+        message: {
+          id: `progress-${index}`,
+          role: 'assistant',
+          content: `Progress ${index}`,
+        },
+      })),
+      {
+        type: 'message',
+        id: 'main',
+        message: {
+          id: 'main',
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: 'Virtual main answer',
+              textSignature: phase('main'),
+            },
+          ],
+        },
+      },
+      {
+        type: 'message',
+        id: 'later',
+        message: {
+          id: 'later',
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: 'Virtual later answer',
+              textSignature: phase('later'),
+            },
+          ],
+        },
+      },
+      {
+        type: 'message',
+        id: 'closure-final',
+        message: {
+          id: 'closure-final',
+          role: 'assistant',
+          content: 'Closure complete',
+        },
+      },
+      {
+        type: 'custom',
+        id: 'closure',
+        customType: 'response-closure',
+        data: {
+          requestMessageId: 'request',
+          finalMessageId: 'closure-final',
+          startedAt: 1000,
+          endedAt: 91000,
+        },
+      },
+    ];
+    await installDashboardBootstrap(
+      page,
+      snapshot(`work-log-virtual-phases-${project}`),
+      {
+        strictApi: true,
+        sessionSnapshot: { entries },
+      },
+    );
+    await routeLegacySessionReads(page);
+    await page.goto('/sessions/session-1');
+    const transcript = page.getByLabel('Transcript', { exact: true });
+    await expect(
+      transcript.getByText('Virtual main answer', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      transcript.getByText('Virtual later answer', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      transcript.getByText('Progress 10', { exact: true }),
+    ).toHaveCount(0);
     assertNoUnexpectedDashboardApiRequests(page);
   });
 
