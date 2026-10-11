@@ -5,6 +5,8 @@ export type NativeSteeringResult =
 
 export interface NativeSteeringController {
   isAvailable(): boolean;
+  /** Accepted input whose server successor is not yet consumed by Pi. */
+  hasPendingContinuation?(): boolean;
   steer(
     input: string,
     onAccepted: () => void | Promise<void>,

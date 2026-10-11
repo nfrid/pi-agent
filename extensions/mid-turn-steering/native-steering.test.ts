@@ -447,6 +447,7 @@ function requireController(sessionId = SESSION_ID) {
 afterEach(() => {
   vi.useRealTimers();
   clearAllNativeSteeringControllers('test cleanup');
+  vi.unstubAllGlobals();
 });
 
 describe('native mid-turn steering transport', () => {
@@ -593,6 +594,114 @@ describe('native mid-turn steering transport', () => {
     expect(socket.closeCount).toBe(1);
     expect(fallback).not.toHaveBeenCalled();
     expect(requireController().isAvailable()).toBe(false);
+  });
+
+  it.each([
+    'custom',
+    'namespace',
+    'web_search',
+  ])('keeps unverified %s tool configurations on upstream HTTP without native availability', async (type) => {
+    activateSession();
+    const { factory, sockets } = makeSocketFactory();
+    const fallback = vi.fn<typeof globalThis.fetch>(
+      async () =>
+        new Response(
+          emptyEvents('resp_unsupported_tools')
+            .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+            .join(''),
+          { headers: { 'content-type': 'text/event-stream' } },
+        ),
+    );
+    const events = await collect(
+      createNativeSteeringStream(factory, fallback)(MODEL, baseContext(), {
+        ...OPTIONS,
+        maxRetries: 0,
+        onPayload: (payload) => ({
+          ...(payload as JsonRecord),
+          tools: [{ type, name: 'unverified' }],
+        }),
+      }),
+    );
+    expect(events.some((event) => event.type === 'done')).toBe(true);
+    expect(fallback).toHaveBeenCalledTimes(1);
+    expect(sockets).toHaveLength(0);
+    expect(getNativeSteeringController(SESSION_ID)).toBeUndefined();
+  });
+
+  it.each([
+    'model',
+    'endpoint',
+    'http',
+    'fetch',
+    'payload',
+  ])('refuses %s fallback after native acceptance instead of replaying its input', async (change) => {
+    activateSession();
+    const network = vi.fn<typeof globalThis.fetch>(async () => {
+      throw new Error('Network disabled in this canary.');
+    });
+    vi.stubGlobal('fetch', network);
+    const { factory, sockets } = makeSocketFactory();
+    const provider = createNativeSteeringStream(factory, network);
+    const context = baseContext();
+    const options = { ...OPTIONS, maxRetries: 0 };
+    const first = collect(provider(MODEL, context, options));
+    const socket = await waitForSocket(sockets);
+    await socket.nextSent();
+    const events = textEvents(
+      'resp_config_guard',
+      'partial',
+      FULL_USAGE,
+      'incomplete',
+    );
+    await emitAll(socket, events.slice(0, -1));
+    const controller = requireController();
+    await vi.waitFor(() => expect(controller.isAvailable()).toBe(true));
+    const accepted = controller.steer('Native input', () => undefined);
+    await socket.nextSent();
+    socket.emit({
+      type: 'response.steer.accepted',
+      steer: {
+        id: 'steer_config_guard',
+        previous_response_id: 'resp_config_guard',
+      },
+    });
+    expect(await accepted).toMatchObject({ status: 'accepted' });
+    const terminal = events.at(-1);
+    if (!terminal) throw new Error('Terminal fixture missing.');
+    socket.emit(terminal);
+    const done = (await first).find((event) => event.type === 'done');
+    if (done?.type !== 'done') throw new Error('Partial fixture missing.');
+    const model =
+      change === 'model'
+        ? { ...MODEL, id: 'unverified-model' }
+        : change === 'endpoint'
+          ? { ...MODEL, baseUrl: 'https://example.invalid/v1' }
+          : MODEL;
+    const nextOptions: SimpleStreamOptions = {
+      ...options,
+      ...(change === 'http' ? { transport: 'sse' as const } : {}),
+      ...(change === 'fetch' ? { fetch: network } : {}),
+      ...(change === 'payload'
+        ? {
+            onPayload: (payload: unknown) => ({
+              ...(payload as JsonRecord),
+              previous_response_id: 'unexpected',
+            }),
+          }
+        : {}),
+    };
+    const next = await collect(
+      provider(
+        model,
+        addAssistantAndUser(context, done.message, 'Native input'),
+        nextOptions,
+      ),
+    );
+    expect(next.some((event) => event.type === 'error')).toBe(true);
+    expect(network).not.toHaveBeenCalled();
+    expect(
+      socket.sentEvents.filter((event) => event.type === 'response.create'),
+    ).toHaveLength(1);
   });
 
   it('parses an empty Responses completion without adding content', async () => {

@@ -77,6 +77,7 @@ export function isNativeSteeringEligible(
     typeof options?.sessionId === 'string' &&
     options.sessionId.length > 0 &&
     options.fetch === undefined &&
+    options.transport !== 'sse' &&
     options.signal?.aborted !== true &&
     isNativeSteeringAgentActive(options.sessionId) &&
     hasCompatibleAuthorization(model.headers, apiKey) &&
@@ -100,6 +101,50 @@ function isCanonicalCreate(
     request.background === undefined &&
     request.previous_response_id === undefined
   );
+}
+
+function hasSupportedTools(body: Record<string, unknown>): boolean {
+  return (
+    body.tools === undefined ||
+    (Array.isArray(body.tools) &&
+      body.tools.every(
+        (tool) =>
+          tool !== null &&
+          typeof tool === 'object' &&
+          (tool as Record<string, unknown>).type === 'function',
+      ))
+  );
+}
+
+function incompatibleContinuation(
+  model: Model<Api>,
+): AssistantMessageEventStream {
+  const stream = createAssistantMessageEventStream();
+  stream.push({
+    type: 'error',
+    reason: 'error',
+    error: {
+      role: 'assistant',
+      api: model.api,
+      provider: model.provider,
+      model: model.id,
+      content: [],
+      stopReason: 'error',
+      errorMessage:
+        'Native steering continuation settings changed; refusing to replay accepted input.',
+      timestamp: Date.now(),
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+    },
+  });
+  stream.end();
+  return stream;
 }
 
 async function requestBody(
@@ -170,8 +215,17 @@ export function createNativeSteeringStream(
   options?: SimpleStreamOptions,
 ) => AssistantMessageEventStream {
   return (model, context, options) => {
-    if (!isNativeSteeringEligible(model, options))
+    if (!isNativeSteeringEligible(model, options)) {
+      const existing = options?.sessionId
+        ? getNativeSteeringController(options.sessionId)
+        : undefined;
+      if (
+        existing instanceof NativeResponsesController &&
+        existing.hasPendingContinuation()
+      )
+        return incompatibleContinuation(model);
       return builtinStreamSimple(model, context, options);
+    }
 
     const sessionId = options.sessionId;
     const apiKey = options.apiKey;
@@ -181,7 +235,17 @@ export function createNativeSteeringStream(
       input: RequestInfo | URL,
       init?: RequestInit,
     ): Promise<Response> => {
-      const fallback = () => httpFetch(input, init);
+      const fallback = () => {
+        const existing = getNativeSteeringController(sessionId);
+        if (
+          existing instanceof NativeResponsesController &&
+          existing.hasPendingContinuation()
+        )
+          throw new Error(
+            'Cannot replay a pending native steering continuation over HTTP.',
+          );
+        return httpFetch(input, init);
+      };
       if (
         requestUrl(input) !== OPENAI_RESPONSES_URL ||
         requestMethod(input, init) !== 'POST' ||
@@ -205,6 +269,11 @@ export function createNativeSteeringStream(
       if (!isCanonicalCreate(body, model)) return fallback();
 
       const existing = getNativeSteeringController(sessionId);
+      // Hosted, namespace, and grammar tool lifecycles are not verified by this
+      // bridge. Leave those requests on the upstream transport, without claiming
+      // a native capability. Existing native continuations still validate/fail
+      // closed rather than silently discarding accepted steering.
+      if (!existing && !hasSupportedTools(body)) return fallback();
       if (existing) {
         if (!(existing instanceof NativeResponsesController))
           throw new Error(
@@ -214,7 +283,9 @@ export function createNativeSteeringStream(
           throw new Error(
             'Native Responses connection failed; refusing to replay the request.',
           );
-        if (!existing.canStartNextRequest()) return fallback();
+        // An already-running request owns the socket. A separate, canonical
+        // reentrant call may use HTTP; it must not consume that owner's successor.
+        if (!existing.canStartNextRequest()) return httpFetch(input, init);
         if (existing.canFallbackToHttp(body)) {
           clearNativeSteeringController(
             sessionId,
@@ -272,6 +343,7 @@ export default defineExtension('mid-turn-steering', (pi: ExtensionAPI) => {
     clearNativeSteeringController(sessionId, undefined, 'session shut down');
   });
   pi.registerProvider('openai', {
+    api: 'openai-responses',
     streamSimple: createNativeSteeringStream(),
   });
 });

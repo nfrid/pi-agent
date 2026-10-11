@@ -396,6 +396,17 @@ export class NativeResponsesController implements NativeSteeringController {
     return this.closed;
   }
 
+  hasPendingContinuation(): boolean {
+    const source = this.lastDeliveredSegment;
+    return (
+      this.pendingSteer !== undefined ||
+      (source?.consumed === false &&
+        (this.acceptedByResponse.get(source.responseId ?? '') ?? []).some(
+          (steer) => steer.status === 'accepted' || steer.admitted,
+        ))
+    );
+  }
+
   canFallbackToHttp(body: JsonRecord): boolean {
     const source = this.lastDeliveredSegment;
     if (
@@ -433,7 +444,7 @@ export class NativeResponsesController implements NativeSteeringController {
       this.opened &&
       this.isAgentActive() &&
       typeof this.latestResponseId() === 'string' &&
-      this.pendingSteer === undefined &&
+      !this.hasPendingContinuation() &&
       (segment === undefined ||
         !(this.acceptedByResponse.get(segment.responseId ?? '') ?? []).some(
           (steer) => steer.status === 'accepted',
