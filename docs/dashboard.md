@@ -345,11 +345,11 @@ in memory, like the native queue, and does not survive a runtime restart.
 Dashboard queue snapshots keep editable `queueDrafts` separate from bounded
 `queueHandoffs`. A handoff carries the same `clientId`, `revision`, mode, and
 safe text metadata. `handing-off` means the runtime called Pi for that revision;
-`accepted` means the underlying SDK send promise fulfilled; `entered` means the
+`accepted` means native SDK queue admission was confirmed; `entered` means the
 runtime matched the exact native user-message object to a persisted branch entry.
-`failed` means the call threw synchronously and the draft remains editable;
-`uncertain` means the SDK promise rejected after the call and the runtime retained
-the draft without allowing retry, edit, or cancellation. A claimed revision is
+`failed` means a definitive rejection before admission and the draft remains editable;
+`uncertain` means queue admission or the native transport outcome could not be
+proven, and the runtime retained the draft without allowing retry, edit, or cancellation. A claimed revision is
 immutable, including while its status is `handing-off`. Drafts can be edited
 before the runtime claims them. Queue sends are admitted one at a time; a known
 failure or uncertain outcome stops the batch and leaves later drafts editable.
@@ -357,6 +357,36 @@ Handoff records are runtime-memory state, scoped to one session, capped at the
 queue limit, and are not durable. The runtime evicts terminal evidence before
 pending or uncertain evidence. An accepted item without a matching branch entry
 remains `accepted`, not `entered`; promise fulfillment is not context evidence.
+
+### Native mid-turn steering
+
+`extensions/mid-turn-steering` adds an optional **Send steer now** icon to the
+first compatible steering draft. Ordinary boundary-queued steering remains the
+default. The icon requires the runtime's active native capability, an exact draft
+revision, text-only input, and no unresolved handoff; it is not inferred from a
+model label. Accepted rows remain visible and immutable until context entry.
+
+The first implementation is deliberately narrow: public OpenAI Responses at
+`https://api.openai.com/v1`, API-key authentication, the documented GPT-6 model
+variants, and flat function tools. Explicit SSE transport, custom fetch adapters,
+custom endpoints, hosted/namespace/grammar tools, and Codex subscription endpoints
+remain on upstream transport without a native button. Codex support must not be
+assumed from model-name similarity. No authenticated API probe is performed.
+
+The extension overrides the public provider stream and injects a request-scoped
+fetch-to-WebSocket/SSE bridge. Upstream request construction, parsing, pricing,
+usage, and Pi's agent loop remain authoritative; neither installed Pi nor its SDK
+is patched. Native acceptance means OpenAI queued the instruction and Pi admitted
+its exact user-message object, not that it was applied. The interrupted terminal
+is withheld until admission, and Pi's next provider call consumes the automatic
+successor instead of sending a duplicate create. Client tool results continue
+through the existing loop. Other drafts wait until that successor is owned by Pi.
+
+A missing acknowledgment, connection loss, or uncertain write is never replayed
+automatically. Changing unsupported configuration during an accepted native
+continuation fails closed. Steering is not simulated with abort/resend. Steered,
+failed, and aborted answer fragments retain their original phases/content but
+are not promoted to final answers in presentation.
 
 ## Dashboard UI principle
 

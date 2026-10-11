@@ -852,9 +852,16 @@ export function toTranscriptEntries(
     }
     const text = messageText(item.content);
     const textPhase = responseTextPhase(item.content);
-    // A server-steered partial may carry final_answer phase, but is not an answer.
-    // Keep its original content in the work log rather than relabeling history.
-    if (textPhase && item.stopReason === 'steered') textPhase.hasAnswer = false;
+    // Interrupted or failed streams can retain final_answer phase fragments.
+    // Preserve their original content/phase without promoting them to answers,
+    // including when native steering fails before its terminal can be released.
+    if (
+      textPhase &&
+      (item.stopReason === 'steered' ||
+        item.stopReason === 'error' ||
+        item.stopReason === 'aborted')
+    )
+      textPhase.hasAnswer = false;
     const thinking = messageThinking(item.content);
     const images = messageImages(item.content);
     const imageCount = images.length;

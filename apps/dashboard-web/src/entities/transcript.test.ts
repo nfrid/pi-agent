@@ -122,6 +122,35 @@ describe('tool row views and virtual transcript construction', () => {
     expect(partial.message.stopReason).toBe('stop');
   });
 
+  it.each([
+    'error',
+    'aborted',
+  ])('does not promote %s final-answer fragments when no steering terminal was released', (stopReason) => {
+    const textSignature = JSON.stringify({
+      v: 1,
+      id: 'failed-partial',
+      phase: 'final_answer',
+    });
+    const message = {
+      role: 'assistant',
+      stopReason,
+      content: [{ type: 'text', text: 'Unconfirmed fragment', textSignature }],
+    };
+    const projection = hydrateTranscript(
+      [{ type: 'message', id: 'partial', message }],
+      'failed-steering-session',
+    );
+    expect(toTranscriptEntries(projection)).toContainEqual(
+      expect.objectContaining({
+        key: 'partial',
+        text: 'Unconfirmed fragment',
+        textPhase: expect.objectContaining({ hasAnswer: false }),
+      }),
+    );
+    expect(message.stopReason).toBe(stopReason);
+    expect(message.content[0]?.textSignature).toBe(textSignature);
+  });
+
   it('keeps marked answer blocks outside collapsed work while restoring original content when opened', () => {
     const phase = (id: string, value: 'commentary' | 'final_answer') =>
       JSON.stringify({ v: 1, id, phase: value });
