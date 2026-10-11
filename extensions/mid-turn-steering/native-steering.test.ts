@@ -19,6 +19,7 @@ import {
   SessionManager,
   SettingsManager,
 } from '@earendil-works/pi-coding-agent';
+import { Type } from 'typebox';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { dispatchDashboardCommand } from '../remote-control/command-dispatcher';
 import { installExternalDeliveryReceipts } from '../remote-control/external-delivery';
@@ -1683,7 +1684,7 @@ describe('native mid-turn steering transport', () => {
     );
   });
 
-  it('runs accepted steering and an automatic tool successor through AgentSession', async () => {
+  it('fences the exact native queue head and later steer through the real AgentSession', async () => {
     const root = await mkdtemp(join(tmpdir(), 'native-steering-agent-'));
     let session:
       | Awaited<ReturnType<typeof createAgentSession>>['session']
@@ -1694,8 +1695,6 @@ describe('native mid-turn steering transport', () => {
     let remoteRuntime: ReturnType<typeof createRemoteControlRuntime>;
     let extensionContext: ExtensionContext | undefined;
     let extensionApi: ExtensionAPI | undefined;
-    let fakeNativeContinuationPending = false;
-    const hasPendingContinuation = vi.fn(() => fakeNativeContinuationPending);
     const nativeStream = createNativeSteeringStream(factory, async (input) => {
       errors.push(new Error(`Unexpected HTTP fallback: ${String(input)}`));
       throw new Error('AgentSession fixture must use its fake WebSocket.');
@@ -1779,8 +1778,6 @@ describe('native mid-turn steering transport', () => {
           event.data && typeof event.data === 'object'
             ? (event.data as { type?: string }).type
             : undefined;
-        if (type === 'response.created' && fakeNativeContinuationPending)
-          fakeNativeContinuationPending = false;
         if (
           remoteRuntime &&
           (type === 'response.created' ||
@@ -1844,10 +1841,6 @@ describe('native mid-turn steering transport', () => {
         const value = getNativeSteeringController(activeSession.sessionId);
         if (!value?.isAvailable())
           throw new Error('Steering is not available yet.');
-        Object.defineProperty(value, 'hasPendingContinuation', {
-          configurable: true,
-          value: hasPendingContinuation,
-        });
         return value;
       });
       if (!remoteRuntime || !extensionContext)
@@ -1890,7 +1883,7 @@ describe('native mid-turn steering transport', () => {
       );
       const steerEvent = await socket.nextSent();
       expect(steerEvent.type).toBe('response.steer');
-      fakeNativeContinuationPending = true;
+      expect(controller.hasPendingContinuation?.()).toBe(true);
       const partialEvents = reasonedSteeredEvents(
         'resp_agent_partial',
         'original partial answer',
@@ -1915,6 +1908,7 @@ describe('native mid-turn steering transport', () => {
         },
       });
       await expect(action).resolves.toMatchObject({ accepted: true });
+      expect(controller.hasPendingContinuation?.()).toBe(true);
       const partialTerminal = partialEvents.at(-1);
       if (!partialTerminal) throw new Error('Missing steered terminal event.');
       socket.emit(partialTerminal);
@@ -1923,7 +1917,6 @@ describe('native mid-turn steering transport', () => {
         canStartNextRequest(): boolean;
       };
       await vi.waitFor(() => expect(state.canStartNextRequest()).toBe(false));
-      await vi.waitFor(() => expect(hasPendingContinuation).toHaveBeenCalled());
       expect(
         socket.sentEvents.filter((event) => event.type === 'response.create'),
       ).toHaveLength(1);
@@ -2037,6 +2030,317 @@ describe('native mid-turn steering transport', () => {
       expect(successorIndex).toBeGreaterThan(nativeIndex);
       expect(dashboardIndex).toBeGreaterThan(successorIndex);
       expect(finalIndex).toBeGreaterThan(dashboardIndex);
+      const partial = messages[partialIndex];
+      if (partial?.role !== 'assistant')
+        throw new Error('Missing partial response.');
+      expect(partial.rawStopReason).toBe('incomplete.steered');
+    } finally {
+      session?.dispose();
+      clearAllNativeSteeringControllers('AgentSession test cleanup');
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps unsupported model, endpoint, auth, and fetch configurations on built-in HTTP', async () => {
+    activateSession();
+    const cases: Array<{
+      name: string;
+      model: Model<Api>;
+      options: SimpleStreamOptions;
+    }> = [
+      {
+        name: 'unsupported model',
+        model: { ...MODEL, id: 'gpt-5.6' },
+        options: OPTIONS,
+      },
+      {
+        name: 'custom endpoint',
+        model: { ...MODEL, baseUrl: 'https://proxy.example/v1' },
+        options: OPTIONS,
+      },
+      {
+        name: 'subscription token',
+        model: MODEL,
+        options: { ...OPTIONS, apiKey: 'chatgpt-access-token' },
+      },
+      {
+        name: 'custom fetch',
+        model: MODEL,
+        options: { ...OPTIONS, fetch: async () => new Response() },
+      },
+    ];
+    for (const testCase of cases)
+      expect(
+        isNativeSteeringEligible(testCase.model, testCase.options),
+        testCase.name,
+      ).toBe(false);
+    expect(isNativeSteeringEligible(MODEL, OPTIONS)).toBe(true);
+
+    const { factory, sockets } = makeSocketFactory();
+    const provider = createNativeSteeringStream(factory);
+    let httpCalls = 0;
+    const events = await collect(
+      provider(MODEL, baseContext(), {
+        ...OPTIONS,
+        fetch: async (_input, _init) => {
+          httpCalls++;
+          return new Response(
+            emptyEvents('resp_http_fallback')
+              .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+              .join(''),
+            { status: 200, headers: { 'content-type': 'text/event-stream' } },
+          );
+        },
+      }),
+    );
+    expect(events.some((event) => event.type === 'done')).toBe(true);
+    expect(httpCalls).toBe(1);
+    expect(sockets).toHaveLength(0);
+  });
+
+  it('runs accepted steering and an automatic tool successor through AgentSession', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'native-steering-agent-'));
+    let session:
+      | Awaited<ReturnType<typeof createAgentSession>>['session']
+      | undefined;
+    const { factory, sockets } = makeSocketFactory();
+    const payloads: JsonRecord[] = [];
+    const errors: unknown[] = [];
+    let toolCalls = 0;
+    const nativeStream = createNativeSteeringStream(factory, async (input) => {
+      errors.push(new Error(`Unexpected HTTP fallback: ${String(input)}`));
+      throw new Error('AgentSession fixture must use its fake WebSocket.');
+    });
+    const streamSimple = (
+      model: Model<Api>,
+      context: TranscriptContext,
+      options?: SimpleStreamOptions,
+    ) => {
+      if (!isNativeSteeringEligible(model, options))
+        throw new Error('AgentSession stream was ineligible.');
+      return nativeStream(model, context, {
+        ...options,
+        async onPayload(payload) {
+          const built = (await options?.onPayload?.(payload, model)) ?? payload;
+          payloads.push(built as JsonRecord);
+          return built;
+        },
+      });
+    };
+    const runtime = await ModelRuntime.create({
+      authPath: join(root, 'auth.json'),
+      modelsPath: null,
+      modelsStorePath: join(root, 'models.sqlite'),
+      refreshOnCreate: false,
+    });
+    runtime.registerProvider('openai', {
+      api: 'openai-responses',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: OPTIONS.apiKey,
+      models: [
+        {
+          id: MODEL.id,
+          name: MODEL.name,
+          api: MODEL.api,
+          input: MODEL.input,
+          reasoning: true,
+          cost: MODEL.cost,
+          contextWindow: MODEL.contextWindow,
+          maxTokens: MODEL.maxTokens,
+        },
+      ],
+    });
+    const settings = SettingsManager.inMemory({
+      compaction: { enabled: false },
+      retry: { enabled: false },
+    });
+    const lifecycle: ExtensionFactory = (pi) => {
+      pi.registerProvider('openai', {
+        api: 'openai-responses',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: OPTIONS.apiKey,
+        streamSimple,
+      });
+      pi.on('agent_start', (_event, context) => {
+        setNativeSteeringAgentActive(
+          context.sessionManager.getSessionId(),
+          true,
+        );
+      });
+      pi.on('agent_end', (_event, context) => {
+        setNativeSteeringAgentActive(
+          context.sessionManager.getSessionId(),
+          false,
+        );
+      });
+      pi.registerTool({
+        name: 'lookup',
+        label: 'Lookup',
+        description: 'Look up a value.',
+        parameters: Type.Object({ key: Type.String() }),
+        execute: async (_id, params) => {
+          toolCalls++;
+          return {
+            content: [{ type: 'text', text: `found ${params.key}` }],
+            details: {},
+          };
+        },
+      });
+    };
+    try {
+      const loader = new DefaultResourceLoader({
+        cwd: root,
+        agentDir: root,
+        settingsManager: settings,
+        noContextFiles: true,
+        noSkills: true,
+        noPromptTemplates: true,
+        noThemes: true,
+        extensionFactories: [lifecycle],
+      });
+      await loader.reload();
+      expect(loader.getExtensions().errors).toEqual([]);
+      const manager = SessionManager.inMemory(root);
+      ({ session } = await createAgentSession({
+        cwd: root,
+        agentDir: root,
+        modelRuntime: runtime,
+        model: runtime.getModel('openai', MODEL.id),
+        settingsManager: settings,
+        sessionManager: manager,
+        resourceLoader: loader,
+        tools: ['lookup'],
+      }));
+      await session.bindExtensions({
+        mode: 'rpc',
+        onError: (error) => errors.push(error),
+      });
+      const promptPromise = session
+        .prompt('Original request')
+        .catch((error) => {
+          errors.push(error);
+        });
+      const socket = await waitForSocket(sockets);
+      const firstCreate = await socket.nextSent();
+      expect(firstCreate.type).toBe('response.create');
+      socket.emit({
+        type: 'response.created',
+        response: {
+          id: 'resp_agent_partial',
+          status: 'in_progress',
+          output: [],
+        },
+      });
+      const activeSession = session;
+      if (!activeSession) throw new Error('Expected the AgentSession.');
+      const controller = await vi.waitFor(() => {
+        const value = getNativeSteeringController(activeSession.sessionId);
+        if (!value?.isAvailable())
+          throw new Error('Steering is not available yet.');
+        return value;
+      });
+      const accepted = controller.steer('Native request', async () => {
+        const result = await activeSession.steer('Native request');
+        if (result !== 'queued')
+          throw new Error(`Expected queued native input, received ${result}.`);
+      });
+      const steerEvent = await socket.nextSent();
+      expect(steerEvent.type).toBe('response.steer');
+      socket.emit({
+        type: 'response.steer.accepted',
+        sequence_number: 2,
+        steer: {
+          id: 'steer_agent_native',
+          previous_response_id: 'resp_agent_partial',
+        },
+      });
+      expect(await accepted).toMatchObject({ status: 'accepted' });
+      await emitAll(
+        socket,
+        reasonedSteeredEvents(
+          'resp_agent_partial',
+          'original partial answer',
+        ).slice(1),
+      );
+
+      const state = controller as typeof controller & {
+        canStartNextRequest(): boolean;
+      };
+      await vi.waitFor(() => expect(state.canStartNextRequest()).toBe(false));
+      expect(
+        socket.sentEvents.filter((event) => event.type === 'response.create'),
+      ).toHaveLength(1);
+      await emitAll(socket, toolEvents('resp_agent_auto_tool'));
+      await vi.waitFor(() => expect(toolCalls).toBe(1));
+      const toolContinuation = await socket.nextSent();
+      expect(toolContinuation).toMatchObject({
+        type: 'response.create',
+        previous_response_id: 'resp_agent_auto_tool',
+      });
+      expect(
+        (toolContinuation.input as JsonRecord[]).filter(
+          (item) =>
+            item.type === 'function_call_output' &&
+            item.call_id === 'call_test_1',
+        ),
+      ).toHaveLength(1);
+      const autoInput = payloads[1]?.input;
+      if (!Array.isArray(autoInput))
+        throw new Error('Missing automatic input history.');
+      expect(autoInput).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'reasoning',
+            encrypted_content: 'native-reasoning-signature',
+          }),
+          expect.objectContaining({
+            type: 'message',
+            role: 'assistant',
+            phase: 'final_answer',
+          }),
+          expect.objectContaining({
+            role: 'user',
+            content: [{ type: 'input_text', text: 'Native request' }],
+          }),
+        ]),
+      );
+
+      await emitAll(socket, textEvents('resp_agent_final', 'final answer'));
+      await promptPromise;
+      expect(errors).toEqual([]);
+      expect(toolCalls).toBe(1);
+      expect(
+        socket.sentEvents.filter((event) => event.type === 'response.create'),
+      ).toHaveLength(2);
+      const messages = session.messages;
+      const partialIndex = messages.findIndex(
+        (message) =>
+          message.role === 'assistant' &&
+          Array.isArray(message.content) &&
+          message.content.some(
+            (block) =>
+              block.type === 'text' && block.text === 'original partial answer',
+          ),
+      );
+      const nativeIndex = messages.findIndex(
+        (message) =>
+          message.role === 'user' &&
+          Array.isArray(message.content) &&
+          message.content.some(
+            (block) => block.type === 'text' && block.text === 'Native request',
+          ),
+      );
+      const successorIndex = messages.findIndex(
+        (message) =>
+          message.role === 'assistant' &&
+          Array.isArray(message.content) &&
+          message.content.some(
+            (block) => block.type === 'toolCall' && block.name === 'lookup',
+          ),
+      );
+      expect(partialIndex).toBeGreaterThanOrEqual(0);
+      expect(nativeIndex).toBeGreaterThan(partialIndex);
+      expect(successorIndex).toBeGreaterThan(nativeIndex);
       const partial = messages[partialIndex];
       if (partial?.role !== 'assistant')
         throw new Error('Missing partial response.');
