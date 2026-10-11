@@ -2,6 +2,10 @@ import {
   commandMutationOptions,
   dashboardHttpClient,
 } from '@pi-dashboard/client';
+import {
+  isActionAvailable,
+  type RuntimeCapabilitySnapshot,
+} from '@pi-dashboard/extension-contributions';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
 import {
@@ -335,10 +339,12 @@ function ActionIcon({ kind }: { kind: 'save' | 'edit' | 'remove' }) {
 
 export function QueuePanel({
   runtimeId,
+  runtime,
   items,
   onItemsChange,
 }: {
   runtimeId: string;
+  runtime?: RuntimeSnapshot;
   items: readonly QueuedMessage[];
   onItemsChange: Dispatch<SetStateAction<QueuedMessage[]>>;
 }) {
@@ -346,6 +352,38 @@ export function QueuePanel({
   const [editingId, setEditingId] = useState<string>();
   const [editingText, setEditingText] = useState('');
   const [error, setError] = useState<string>();
+  const runtimeKey = runtime
+    ? `${runtime.runtimeId}:${runtime.session.id}`
+    : runtimeId;
+  const runtimeKeyRef = useRef(runtimeKey);
+  const nativeInFlightRef = useRef(false);
+  if (runtimeKeyRef.current !== runtimeKey) nativeInFlightRef.current = false;
+  runtimeKeyRef.current = runtimeKey;
+  const nativeAction = runtime?.capabilities?.manifests
+    .flatMap((manifest) => manifest.actions)
+    .find((action) => action.id === 'queue.steer-now');
+  const nativeAvailable = Boolean(
+    runtime &&
+      runtime.runtimeId === runtimeId &&
+      runtime.online === true &&
+      runtime.capabilities?.capabilities.some(
+        (capability) =>
+          capability.id === 'remote-control.native-steering' &&
+          capability.available === true,
+      ) &&
+      nativeAction &&
+      isActionAvailable(
+        nativeAction,
+        runtime.capabilities as RuntimeCapabilitySnapshot | undefined,
+        { online: runtime.online, liveState: runtime.liveState },
+      ),
+  );
+  const blockedHandoff = items.some(
+    (item) =>
+      item.status === 'handing-off' ||
+      item.status === 'accepted' ||
+      item.status === 'uncertain',
+  );
   const locked = (item: QueuedMessage) =>
     item.status === 'handing-off' ||
     item.status === 'accepted' ||
@@ -373,6 +411,31 @@ export function QueuePanel({
       setEditingId(undefined);
     } catch (cause) {
       setError(errorMessage(cause));
+    }
+  };
+  const sendNow = async (item: QueuedMessage) => {
+    if (!runtime || mutation.isPending || nativeInFlightRef.current) return;
+    const key = runtimeKey;
+    nativeInFlightRef.current = true;
+    setError(undefined);
+    try {
+      await mutation.mutateAsync({
+        runtimeId,
+        command: {
+          id: newQueueId(),
+          type: 'action.invoke',
+          actionId: 'queue.steer-now',
+          input: {
+            clientId: item.id,
+            revision: item.revision,
+            expectedSessionId: runtime.session.id,
+          },
+        },
+      });
+    } catch (cause) {
+      if (runtimeKeyRef.current === key) setError(errorMessage(cause));
+    } finally {
+      if (runtimeKeyRef.current === key) nativeInFlightRef.current = false;
     }
   };
   const remove = async (item: QueuedMessage) => {
@@ -491,6 +554,27 @@ export function QueuePanel({
                     <ActionIcon kind="edit" />
                   </AriaButton>
                 )}
+                {nativeAvailable &&
+                  item.mode === 'steer' &&
+                  items.find((candidate) => candidate.mode === 'steer') ===
+                    item &&
+                  typeof item.revision === 'number' &&
+                  Number.isInteger(item.revision) &&
+                  item.revision > 0 &&
+                  !item.imageCount &&
+                  !editing &&
+                  !itemLocked &&
+                  !blockedHandoff && (
+                    <AriaButton
+                      type="button"
+                      aria-label="Send steer now"
+                      data-tooltip="Send steer now"
+                      isDisabled={mutation.isPending}
+                      onPress={() => void sendNow(item)}
+                    >
+                      <span aria-hidden="true">↯</span>
+                    </AriaButton>
+                  )}
                 <AriaButton
                   type="button"
                   className="queue-remove"

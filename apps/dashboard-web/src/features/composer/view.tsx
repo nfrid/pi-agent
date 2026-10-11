@@ -389,6 +389,7 @@ export function Composer({
         ) && (
           <QueuePanel
             runtimeId={runtime.runtimeId}
+            runtime={runtime}
             items={queue}
             onItemsChange={setQueue}
           />
