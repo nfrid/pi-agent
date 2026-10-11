@@ -383,6 +383,9 @@ export class NativeResponsesController implements NativeSteeringController {
       this.openResolve = resolve;
       this.openReject = reject;
     });
+    // Setup can fail before startInitial reaches its await (or be aborted there).
+    // The caller still receives the failure, without an orphaned rejection.
+    void this.openPromise.catch(() => undefined);
   }
 
   get hasSentRequest(): boolean {
@@ -466,7 +469,14 @@ export class NativeResponsesController implements NativeSteeringController {
     }
     const create = this.createEvent(body);
     this.sentRequest = true;
-    this.socket.send(create);
+    try {
+      this.socket.send(create);
+    } catch (error) {
+      // A write exception cannot prove the server did not receive the create.
+      // Pin the failed connection so upstream retries cannot fall back/replay.
+      this.fail(asError(error));
+      throw error;
+    }
     return segment.responseBody();
   }
 

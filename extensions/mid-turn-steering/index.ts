@@ -43,19 +43,23 @@ function hasCompatibleAuthorization(
   return true;
 }
 
-function toSocketHeaders(
-  modelHeaders: Record<string, string | null> | undefined,
-  optionsHeaders: Record<string, string | null> | undefined,
-): Record<string, string> {
-  const headers: Record<string, string> = {};
-  for (const source of [modelHeaders, optionsHeaders]) {
-    for (const [name, value] of Object.entries(source ?? {})) {
-      const normalizedName = name.toLowerCase();
-      if (value === null) delete headers[normalizedName];
-      else headers[normalizedName] = value;
-    }
-  }
-  return headers;
+const HTTP_ONLY_HEADERS = new Set([
+  'accept',
+  'content-type',
+  'content-length',
+  'transfer-encoding',
+  'connection',
+  'host',
+  'upgrade',
+]);
+
+function toSocketHeaders(headers: Headers): Record<string, string> {
+  return Object.fromEntries(
+    [...headers].filter(
+      ([name]) =>
+        !HTTP_ONLY_HEADERS.has(name) && !name.startsWith('sec-websocket-'),
+    ),
+  );
 }
 
 export function isNativeSteeringEligible(
@@ -171,7 +175,6 @@ export function createNativeSteeringStream(
 
     const sessionId = options.sessionId;
     const apiKey = options.apiKey;
-    const headers = toSocketHeaders(model.headers, options.headers);
     const httpFetch = fallbackFetch.bind(globalThis);
 
     const fetch = async (
@@ -186,7 +189,10 @@ export function createNativeSteeringStream(
       )
         return fallback();
 
-      const authorization = requestHeaders(input, init).get('authorization');
+      // Reuse the final upstream headers, including session affinity/tracing,
+      // rather than reconstructing only the explicit model/options overrides.
+      const headers = requestHeaders(input, init);
+      const authorization = headers.get('authorization');
       if (authorization !== `Bearer ${apiKey}`) return fallback();
       const rawBody = await requestBody(input, init);
       if (rawBody === undefined) return fallback();
@@ -223,7 +229,7 @@ export function createNativeSteeringStream(
       const controller = createNativeResponsesController(
         sessionId,
         apiKey,
-        headers,
+        toSocketHeaders(headers),
         () => isNativeSteeringAgentActive(sessionId),
         socketFactory,
       );

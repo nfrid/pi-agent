@@ -514,6 +514,87 @@ describe('native mid-turn steering transport', () => {
     ).toHaveLength(1);
   });
 
+  it('preserves final upstream affinity and custom headers in the socket handshake', async () => {
+    activateSession();
+    const socket = new FakeSocket();
+    let socketHeaders: Record<string, string> | undefined;
+    const provider = createNativeSteeringStream((_apiKey, headers) => {
+      socketHeaders = headers;
+      return socket;
+    });
+    const result = collect(
+      provider(
+        { ...MODEL, headers: { 'OpenAI-Organization': 'org-fixture' } },
+        baseContext(),
+        {
+          ...OPTIONS,
+          headers: {
+            'OpenAI-Project': 'project-fixture',
+            'x-custom-test': 'fixture',
+          },
+        },
+      ),
+    );
+    await socket.nextSent();
+    await emitAll(socket, emptyEvents('resp_headers'));
+    expect((await result).some((event) => event.type === 'done')).toBe(true);
+    expect(socketHeaders).toMatchObject({
+      session_id: SESSION_ID,
+      'x-client-request-id': SESSION_ID,
+      'openai-organization': 'org-fixture',
+      'openai-project': 'project-fixture',
+      'x-custom-test': 'fixture',
+    });
+    expect(socketHeaders).not.toHaveProperty('content-type');
+    expect(socketHeaders).not.toHaveProperty('content-length');
+  });
+
+  it('falls back before any create when socket construction fails without an orphaned rejection', async () => {
+    activateSession();
+    const factory = vi.fn(() => {
+      throw new Error('WebSocket runtime is unavailable.');
+    });
+    const fallback = vi.fn<typeof globalThis.fetch>(
+      async () =>
+        new Response(
+          emptyEvents('resp_setup_fallback')
+            .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+            .join(''),
+          { headers: { 'content-type': 'text/event-stream' } },
+        ),
+    );
+    const events = await collect(
+      createNativeSteeringStream(factory, fallback)(MODEL, baseContext(), {
+        ...OPTIONS,
+        maxRetries: 0,
+      }),
+    );
+    expect(events.some((event) => event.type === 'done')).toBe(true);
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(fallback).toHaveBeenCalledTimes(1);
+    expect(getNativeSteeringController(SESSION_ID)).toBeUndefined();
+  });
+
+  it('pins an uncertain create write so a retry cannot create or fall back again', async () => {
+    activateSession();
+    const socket = new FakeSocket();
+    socket.send = (event) => {
+      socket.sentEvents.push(event);
+      throw new Error('Write outcome is unknown.');
+    };
+    const fallback = vi.fn<typeof globalThis.fetch>();
+    const provider = createNativeSteeringStream(() => socket, fallback);
+    const options = { ...OPTIONS, maxRetries: 0 };
+    const first = await collect(provider(MODEL, baseContext(), options));
+    expect(first.some((event) => event.type === 'error')).toBe(true);
+    const retry = await collect(provider(MODEL, baseContext(), options));
+    expect(retry.some((event) => event.type === 'error')).toBe(true);
+    expect(socket.sentEvents).toHaveLength(1);
+    expect(socket.closeCount).toBe(1);
+    expect(fallback).not.toHaveBeenCalled();
+    expect(requireController().isAvailable()).toBe(false);
+  });
+
   it('parses an empty Responses completion without adding content', async () => {
     activateSession();
     const { factory, sockets } = makeSocketFactory();
