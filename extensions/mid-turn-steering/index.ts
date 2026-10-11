@@ -8,8 +8,12 @@ import {
   type SimpleStreamOptions,
   type TranscriptContext,
 } from '@earendil-works/pi-ai/compat';
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from '@earendil-works/pi-coding-agent';
 import { defineExtension } from '../shared/runtime/extension';
+import { isLogicalSteering } from '../shared/runtime/logical-input';
 import {
   clearAllNativeSteeringControllers,
   clearNativeSteeringController,
@@ -131,7 +135,7 @@ function incompatibleContinuation(
       content: [],
       stopReason: 'error',
       errorMessage:
-        'Native steering continuation settings changed; refusing to replay accepted input.',
+        'Native Responses request outcome is uncertain; refusing to replay it.',
       timestamp: Date.now(),
       usage: {
         input: 0,
@@ -206,6 +210,15 @@ function toEventStream(
   return output;
 }
 
+function hasUnsafeNativeContinuation(
+  controller: NativeResponsesController,
+): boolean {
+  return (
+    controller.hasPendingContinuation() ||
+    (controller.isClosed && controller.hasSentRequest)
+  );
+}
+
 export function createNativeSteeringStream(
   socketFactory?: ResponsesSocketFactory,
   fallbackFetch: typeof globalThis.fetch = globalThis.fetch,
@@ -221,7 +234,7 @@ export function createNativeSteeringStream(
         : undefined;
       if (
         existing instanceof NativeResponsesController &&
-        existing.hasPendingContinuation()
+        hasUnsafeNativeContinuation(existing)
       )
         return incompatibleContinuation(model);
       return builtinStreamSimple(model, context, options);
@@ -239,10 +252,10 @@ export function createNativeSteeringStream(
         const existing = getNativeSteeringController(sessionId);
         if (
           existing instanceof NativeResponsesController &&
-          existing.hasPendingContinuation()
+          hasUnsafeNativeContinuation(existing)
         )
           throw new Error(
-            'Cannot replay a pending native steering continuation over HTTP.',
+            'Cannot replay an uncertain native Responses request over HTTP.',
           );
         return httpFetch(input, init);
       };
@@ -327,21 +340,90 @@ export function createNativeSteeringStream(
   };
 }
 
-export default defineExtension('mid-turn-steering', (pi: ExtensionAPI) => {
-  clearAllNativeSteeringControllers();
+export function installNativeSteeringLifecycle(pi: ExtensionAPI): void {
+  const latestUserIds = new Map<string, string | undefined>();
+  const branch = (ctx: ExtensionContext) => ctx.sessionManager.getBranch();
+  const latestNonLogicalUserIndex = (
+    entries: ReturnType<ExtensionContext['sessionManager']['getBranch']>,
+  ) => {
+    for (let index = entries.length - 1; index >= 0; index--) {
+      const entry = entries[index];
+      if (
+        entry?.type === 'message' &&
+        entry.message.role === 'user' &&
+        !isLogicalSteering(entry.message)
+      )
+        return index;
+    }
+    return -1;
+  };
+
   pi.on('agent_start', (_event, ctx) => {
     setNativeSteeringAgentActive(ctx.sessionManager.getSessionId(), true);
   });
   pi.on('agent_end', (_event, ctx) => {
     const sessionId = ctx.sessionManager.getSessionId();
     setNativeSteeringAgentActive(sessionId, false);
-    clearNativeSteeringController(sessionId, undefined, 'agent ended');
+    const controller = getNativeSteeringController(sessionId);
+    if (
+      controller instanceof NativeResponsesController &&
+      hasUnsafeNativeContinuation(controller)
+    ) {
+      controller.close('agent ended with uncertain native request');
+      const entries = branch(ctx);
+      const latestIndex = latestNonLogicalUserIndex(entries);
+      latestUserIds.set(
+        sessionId,
+        latestIndex < 0 ? undefined : entries[latestIndex]?.id,
+      );
+    } else {
+      clearNativeSteeringController(sessionId, undefined, 'agent ended');
+      latestUserIds.delete(sessionId);
+    }
+  });
+  pi.on('context', (_event, ctx) => {
+    const sessionId = ctx.sessionManager.getSessionId();
+    const entries = branch(ctx);
+    const latestIndex = latestNonLogicalUserIndex(entries);
+    const latestId = latestIndex < 0 ? undefined : entries[latestIndex]?.id;
+    const controller = getNativeSteeringController(sessionId);
+    if (
+      controller instanceof NativeResponsesController &&
+      hasUnsafeNativeContinuation(controller)
+    ) {
+      const previousId = latestUserIds.get(sessionId);
+      const previousIndex = previousId
+        ? entries.findIndex((entry) => entry.id === previousId)
+        : -1;
+      if (
+        latestId !== previousId &&
+        previousIndex >= 0 &&
+        latestIndex > previousIndex
+      ) {
+        clearNativeSteeringController(
+          sessionId,
+          controller,
+          'fresh user request started',
+        );
+        latestUserIds.delete(sessionId);
+      } else {
+        latestUserIds.set(sessionId, latestId);
+      }
+    } else {
+      latestUserIds.delete(sessionId);
+    }
   });
   pi.on('session_shutdown', (_event, ctx) => {
     const sessionId = ctx.sessionManager.getSessionId();
     setNativeSteeringAgentActive(sessionId, false);
+    latestUserIds.delete(sessionId);
     clearNativeSteeringController(sessionId, undefined, 'session shut down');
   });
+}
+
+export default defineExtension('mid-turn-steering', (pi: ExtensionAPI) => {
+  clearAllNativeSteeringControllers();
+  installNativeSteeringLifecycle(pi);
   pi.registerProvider('openai', {
     api: 'openai-responses',
     streamSimple: createNativeSteeringStream(),

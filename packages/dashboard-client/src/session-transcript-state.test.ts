@@ -408,6 +408,70 @@ describe('session transcript state', () => {
     ]);
   });
 
+  it('keeps the authoritative warning when live and saved records overlap', () => {
+    const startedAt = 1790610300000;
+    const persistedDetails = {
+      identity: 'impl@1',
+      logicalId: 'impl',
+      route: 'delegate',
+      startedAt,
+      elapsedMs: 1200,
+      warningAfterMs: 1000,
+      status: 'warning',
+    };
+    const installed = installAuthoritativeTranscript({
+      response: {
+        metadata: {
+          id: 'session-warning',
+          file: '',
+          cwd: '/tmp',
+          updatedAt: 1,
+        },
+        entries: [
+          {
+            type: 'custom_message',
+            id: 'saved-warning',
+            customType: 'delegate-runtime-warning',
+            content: 'Saved warning body',
+            details: persistedDetails,
+            timestamp: startedAt,
+          },
+        ],
+        entriesComplete: true,
+        cursor: 4,
+        active: {
+          messages: [
+            {
+              messageId: 'synthetic-live-warning',
+              role: 'custom',
+              content: 'Live warning body',
+              timestamp: startedAt + 60000,
+              data: {
+                customType: 'delegate-runtime-warning',
+                details: persistedDetails,
+              },
+            },
+          ],
+          tools: [],
+        },
+      } as unknown as AuthoritativeSessionSnapshot,
+      generation: 1,
+      coveredCursor: 4,
+    });
+
+    expect(installed.projection.order).toEqual(['saved-warning']);
+    expect(installed.projection.items['saved-warning']).toMatchObject({
+      kind: 'other',
+      id: 'saved-warning',
+      raw: {
+        content: 'Saved warning body',
+        timestamp: startedAt,
+        customType: 'delegate-runtime-warning',
+        details: persistedDetails,
+      },
+    });
+  });
+
   it('uses stable custom identities without text-only or ambiguous matches', () => {
     const cases = [
       {
@@ -462,6 +526,80 @@ describe('session transcript state', () => {
           details: { jobs: [{ id: 'job-a' }, { id: 'job-b' }] },
         },
         expected: 'entry-0',
+      },
+      {
+        name: 'warning same attempt despite different body and timestamp',
+        entries: [
+          {
+            customType: 'delegate-runtime-warning',
+            details: { identity: 'impl@1', startedAt: 1790610300000 },
+          },
+        ],
+        live: {
+          customType: 'delegate-runtime-warning',
+          details: { identity: 'impl@1', startedAt: 1790610300000 },
+        },
+        expected: 'entry-0',
+      },
+      {
+        name: 'warning different attempt start',
+        entries: [
+          {
+            customType: 'delegate-runtime-warning',
+            details: { identity: 'impl@1', startedAt: 1790610300000 },
+          },
+        ],
+        live: {
+          customType: 'delegate-runtime-warning',
+          details: { identity: 'impl@1', startedAt: 1790610400000 },
+        },
+        expected: undefined,
+      },
+      {
+        name: 'warning identity does not dedupe generic custom type',
+        entries: [
+          {
+            customType: 'notice',
+            details: { identity: 'impl@1', startedAt: 1 },
+          },
+        ],
+        live: {
+          customType: 'notice',
+          details: { identity: 'impl@1', startedAt: 1 },
+        },
+        expected: undefined,
+      },
+      {
+        name: 'negative warning start is invalid',
+        entries: [
+          {
+            customType: 'delegate-runtime-warning',
+            details: { identity: 'impl@1', startedAt: -1 },
+          },
+        ],
+        live: {
+          customType: 'delegate-runtime-warning',
+          details: { identity: 'impl@1', startedAt: -1 },
+        },
+        expected: undefined,
+      },
+      {
+        name: 'ambiguous warning attempt',
+        entries: [
+          {
+            customType: 'delegate-runtime-warning',
+            details: { identity: 'impl@1', startedAt: 1 },
+          },
+          {
+            customType: 'delegate-runtime-warning',
+            details: { identity: 'impl@1', startedAt: 1 },
+          },
+        ],
+        live: {
+          customType: 'delegate-runtime-warning',
+          details: { identity: 'impl@1', startedAt: 1 },
+        },
+        expected: undefined,
       },
     ] as const;
 

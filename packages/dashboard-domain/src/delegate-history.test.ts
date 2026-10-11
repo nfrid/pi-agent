@@ -825,6 +825,284 @@ describe('delegate history adapter', () => {
     expect(allRuns[0]?.lineageId).toBe(allRuns[0]?.runId);
   });
 
+  it('does not let omitted workflow write metadata clobber actual run evidence', () => {
+    const attempt = (number: number, allowWrites?: boolean) => ({
+      ownerBranchId: 'owner-a',
+      logicalId: 'review',
+      attempt: number,
+      identity: `review@${number}`,
+      state: 'success',
+      dependencies: number === 1 ? [] : [`review@${number - 1}`],
+      waitingFor: [],
+      createdAt: number,
+      scheduledAt: number,
+      settledAt: number + 1,
+      ...(allowWrites === undefined ? {} : { allowWrites }),
+    });
+    const branch = [
+      { type: 'session', id: 'parent-1' },
+      {
+        type: 'message',
+        id: 'actual-continuation',
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: {
+            runs: [
+              oldRun({
+                runId: 'actual-continuation-run',
+                lineageId: 'actual-lineage',
+                allowWrites: true,
+                workflow: {
+                  ownerBranchId: 'owner-a',
+                  logicalId: 'review',
+                  attempt: 2,
+                  identity: 'review@2',
+                },
+              }),
+            ],
+          },
+        },
+      },
+      {
+        type: 'custom',
+        id: 'workflow-history',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'snapshot',
+          state: {
+            version: 1,
+            attempts: [attempt(1, true), attempt(2)],
+          },
+        },
+      },
+    ];
+
+    const response = delegateHistoryFromBranch('parent-1', branch);
+    const continuation = response.groups.find(
+      (group) => group.runId === 'actual-continuation-run',
+    );
+    expect(continuation?.allowWrites).toBe(true);
+    expect(continuation?.runs[0]?.allowWrites).toBe(true);
+  });
+
+  it('shows workflow-only continuations as writable from their inherited grant', () => {
+    const attempt = (number: number, allowWrites?: boolean) => ({
+      ownerBranchId: 'owner-a',
+      logicalId: 'review',
+      attempt: number,
+      identity: `review@${number}`,
+      state: 'success',
+      dependencies:
+        number === 1 ? [] : [number === 2 ? 'review@1' : 'review@2'],
+      waitingFor: [],
+      createdAt: number,
+      scheduledAt: number,
+      settledAt: number + 1,
+      sessionId: 'child-session',
+      ...(allowWrites === undefined ? {} : { allowWrites }),
+    });
+    const response = delegateHistoryFromBranch('parent-1', [
+      { type: 'session', id: 'parent-1' },
+      {
+        type: 'custom',
+        id: 'workflow-history',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'snapshot',
+          state: {
+            version: 1,
+            attempts: [attempt(3), attempt(1, true), attempt(2)],
+          },
+        },
+      },
+    ]);
+    const group = response.groups[0];
+    expect(group?.allowWrites).toBe(true);
+    expect(
+      group?.runs.map(({ workflow, allowWrites }) => [
+        workflow?.identity,
+        allowWrites,
+      ]),
+    ).toEqual([
+      ['review@3', true],
+      ['review@1', true],
+      ['review@2', true],
+    ]);
+  });
+
+  it('preserves actual read-only run and job metadata during projection', () => {
+    const runProjection = projectDelegateHistoryEntry(
+      {
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: { runs: [oldRun({ allowWrites: false })] },
+        },
+      },
+      { sessionId: 'parent-1' },
+    ).entry as { message?: { details?: { runs?: Record<string, unknown>[] } } };
+    expect(runProjection.message?.details?.runs?.[0]?.allowWrites).toBe(false);
+
+    const jobProjection = projectDelegateHistoryEntry(
+      {
+        customType: 'delegate-job-result',
+        details: {
+          jobs: [
+            {
+              id: 'job-readonly',
+              allowWrites: false,
+              runs: [oldRun({ allowWrites: false })],
+            },
+          ],
+        },
+      },
+      { sessionId: 'parent-1' },
+    ).entry as {
+      details?: {
+        jobs?: Array<{
+          allowWrites?: boolean;
+          runs?: Array<{ allowWrites?: boolean }>;
+        }>;
+      };
+    };
+    expect(jobProjection.details?.jobs?.[0]).toMatchObject({
+      allowWrites: false,
+      runs: [{ allowWrites: false }],
+    });
+  });
+
+  it('does not infer a grant over an actual read-only continuation run', () => {
+    const attempt = (number: number, allowWrites?: boolean) => ({
+      ownerBranchId: 'owner-a',
+      logicalId: 'review',
+      attempt: number,
+      identity: `review@${number}`,
+      state: 'success',
+      dependencies: number === 1 ? [] : [`review@${number - 1}`],
+      waitingFor: [],
+      createdAt: number,
+      scheduledAt: number,
+      settledAt: number + 1,
+      sessionId: 'child-session',
+      ...(allowWrites === undefined ? {} : { allowWrites }),
+    });
+    const response = delegateHistoryFromBranch('parent-1', [
+      { type: 'session', id: 'parent-1' },
+      {
+        type: 'message',
+        id: 'readonly-run',
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: {
+            runs: [
+              oldRun({
+                runId: 'readonly-continuation',
+                lineageId: 'review-lineage',
+                sessionId: 'child-session',
+                allowWrites: false,
+                workflow: {
+                  ownerBranchId: 'owner-a',
+                  logicalId: 'review',
+                  attempt: 2,
+                  identity: 'review@2',
+                  dependencies: ['review@1'],
+                },
+              }),
+            ],
+          },
+        },
+      },
+      {
+        type: 'custom',
+        id: 'workflow-history',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'snapshot',
+          state: {
+            version: 1,
+            attempts: [attempt(1, true), attempt(2)],
+          },
+        },
+      },
+    ]);
+    const group = response.groups.find(
+      ({ runId }) => runId === 'readonly-continuation',
+    );
+    expect(group?.allowWrites).toBe(false);
+    expect(group?.runs[0]?.allowWrites).toBe(false);
+  });
+
+  it('inherits only omitted workflow continuation grants from the exact predecessor', () => {
+    const attempt = (
+      ownerBranchId: string,
+      number: number,
+      dependencies: string[],
+      allowWrites?: boolean,
+      sessionId = 'child-session',
+    ) => ({
+      ownerBranchId,
+      logicalId: 'review',
+      attempt: number,
+      identity: `review@${number}`,
+      state: 'success',
+      dependencies,
+      waitingFor: [],
+      createdAt: number,
+      scheduledAt: number,
+      settledAt: number + 1,
+      sessionId,
+      ...(allowWrites === undefined ? {} : { allowWrites }),
+    });
+    const branch = [
+      { type: 'session', id: 'parent-1' },
+      {
+        type: 'custom',
+        id: 'workflow-history',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'snapshot',
+          state: {
+            version: 1,
+            attempts: [
+              attempt('owner-a', 1, [], true),
+              attempt('owner-a', 2, ['review@1']),
+              attempt('owner-a', 3, ['review@2'], false),
+              attempt('owner-a', 4, ['unrelated@1']),
+              attempt('owner-a', 5, ['review@4'], true),
+              attempt('owner-a', 6, ['review@5'], undefined, 'other-session'),
+              attempt('owner-b', 2, ['review@1']),
+            ],
+          },
+        },
+      },
+    ];
+
+    const groups = delegateHistoryFromBranch('parent-1', branch).groups;
+    const ownerA = groups.find(
+      (group) => group.workflow?.ownerBranchId === 'owner-a',
+    );
+    const ownerB = groups.find(
+      (group) => group.workflow?.ownerBranchId === 'owner-b',
+    );
+    expect(ownerA?.runs.map(({ allowWrites }) => allowWrites)).toEqual([
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+    ]);
+    expect(ownerA?.allowWrites).toBe(false);
+    expect(ownerB?.runs.map(({ allowWrites }) => allowWrites)).toEqual([false]);
+  });
+
   it('reconciles workflow placeholders with actual runs by owner and identity', () => {
     const workflowAttempt = (ownerBranchId: string, state: string) => ({
       ownerBranchId,

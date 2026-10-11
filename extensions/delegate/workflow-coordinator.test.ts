@@ -1348,6 +1348,106 @@ describe('DelegateWorkflowCoordinator', () => {
     await coordinator.dispose();
   });
 
+  test('restores and inherits continuation write grants without crossing owners', async () => {
+    const coordinator = new DelegateWorkflowCoordinator({
+      ownerBranchId: 'branch-write-grants',
+    });
+    coordinator.restoreMetadata({
+      version: 1,
+      attempts: [
+        {
+          ownerBranchId: 'branch-write-grants',
+          logicalId: 'writable',
+          attempt: 1,
+          identity: 'writable@1',
+          state: 'success',
+          dependencies: [],
+          waitingFor: [],
+          createdAt: 1,
+          scheduledAt: 1,
+          settledAt: 2,
+          allowWrites: true,
+        },
+        {
+          ownerBranchId: 'branch-write-grants',
+          logicalId: 'writable',
+          attempt: 2,
+          identity: 'writable@2',
+          state: 'success',
+          dependencies: ['writable@1'],
+          waitingFor: [],
+          createdAt: 3,
+          scheduledAt: 3,
+          settledAt: 4,
+        },
+        {
+          ownerBranchId: 'branch-write-grants',
+          logicalId: 'readonly',
+          attempt: 1,
+          identity: 'readonly@1',
+          state: 'success',
+          dependencies: [],
+          waitingFor: [],
+          createdAt: 1,
+          scheduledAt: 1,
+          settledAt: 2,
+          allowWrites: false,
+        },
+        {
+          ownerBranchId: 'sibling-branch',
+          logicalId: 'writable',
+          attempt: 1,
+          identity: 'writable@1',
+          state: 'success',
+          dependencies: [],
+          waitingFor: [],
+          createdAt: 1,
+          scheduledAt: 1,
+          settledAt: 2,
+          allowWrites: true,
+        },
+      ],
+    });
+
+    expect(coordinator.require('writable@2').allowWrites).toBe(true);
+    expect(coordinator.get('sibling@1')).toBeUndefined();
+    const writable = coordinator.schedule({
+      logicalId: 'writable',
+      continuation: true,
+      allowWrites: false,
+      prepare: async () => ({
+        mode: 'single',
+        tasks: ['continued'],
+        execute: async () => result('continued'),
+      }),
+    });
+    const readonly = coordinator.schedule({
+      logicalId: 'readonly',
+      continuation: true,
+      allowWrites: true,
+      prepare: async () => ({
+        mode: 'single',
+        tasks: ['readonly'],
+        execute: async () => result('readonly'),
+      }),
+    });
+    expect(writable.allowWrites).toBe(true);
+    expect(readonly.allowWrites).toBe(false);
+    expect(
+      coordinator
+        .metadataSnapshot()
+        .attempts.find(({ identity }) => identity === 'writable@3')
+        ?.allowWrites,
+    ).toBe(true);
+    expect(
+      coordinator
+        .metadataSnapshot()
+        .attempts.find(({ identity }) => identity === 'readonly@2')
+        ?.allowWrites,
+    ).toBe(false);
+    await coordinator.dispose();
+  });
+
   test('blocks a restored continuation with no token or session identity', async () => {
     const coordinator = new DelegateWorkflowCoordinator({
       ownerBranchId: 'branch-blocked',

@@ -76,6 +76,69 @@ describe('live message identity', () => {
     expect(mark.data).toEqual({ deliveryMode: 'steer' });
   });
 
+  it('keeps non-assistant messages out of an active assistant lifecycle', () => {
+    const normalizer = new LiveEventNormalizer('runtime-interleave');
+    const start = normalizer.normalizeMessage('started', {
+      message: { role: 'assistant', timestamp: 123, content: [] },
+    });
+    normalizer.normalizeMessage('updated', {
+      assistantMessageEvent: {
+        type: 'text_delta',
+        contentIndex: 0,
+        delta: 'Answer',
+      },
+    });
+    normalizer.normalizeMessage('updated', {
+      assistantMessageEvent: {
+        type: 'thinking_delta',
+        contentIndex: 1,
+        delta: 'Thinking\n',
+      },
+    });
+    normalizer.normalizeToolCall({
+      type: 'toolcall_delta',
+      contentIndex: 2,
+      toolCallId: 'tool-1',
+      toolName: 'read',
+      delta: '{"path":',
+    });
+    const warning = normalizer.normalizeMessage('finished', {
+      message: { role: 'custom', timestamp: 124, content: '' },
+    });
+    const assistantUpdate = normalizer.normalizeMessage('updated', {
+      assistantMessageEvent: {
+        type: 'text_delta',
+        contentIndex: 0,
+        delta: ' continued',
+      },
+    });
+    const tool = normalizer.normalizeToolCall({
+      type: 'toolcall_end',
+      contentIndex: 2,
+    });
+    const finish = normalizer.normalizeMessage('finished', {
+      message: {
+        role: 'assistant',
+        timestamp: 123,
+        responseId: 'response-late',
+        content: 'Answer continued',
+      },
+    });
+
+    expect(warning.messageId).not.toBe(start.messageId);
+    expect(warning.content).toBe('');
+    expect(assistantUpdate.messageId).toBe(start.messageId);
+    expect(assistantUpdate.content).toEqual([
+      { type: 'text', text: 'Answer continued' },
+      { type: 'thinking', thinking: 'Thinking\n' },
+    ]);
+    expect(finish.messageId).toBe(start.messageId);
+    expect(finish.content).toBe('Answer continued');
+    expect(tool).toMatchObject([
+      { toolCallId: 'tool-1', name: 'read', argumentDelta: '{"path":' },
+    ]);
+  });
+
   it('keeps assistant lifecycle identity when response ID appears only at completion', () => {
     const normalizer = new LiveEventNormalizer();
     const start = normalizer.normalizeMessage('started', {

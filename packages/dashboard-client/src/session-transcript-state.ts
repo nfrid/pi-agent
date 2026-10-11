@@ -639,10 +639,33 @@ function customMessageIdentity(value: unknown): string | undefined {
   const message = value as Record<string, unknown>;
   if (typeof message.customType !== 'string' || !message.customType)
     return undefined;
-  const key = customMessageDedupeKey(message.details);
-  return key === undefined
-    ? undefined
-    : JSON.stringify(['custom', message.customType, key]);
+  const details = message.details;
+  const key = customMessageDedupeKey(details);
+  if (key !== undefined)
+    return JSON.stringify(['custom', message.customType, key]);
+  if (
+    message.customType === 'delegate-runtime-warning' &&
+    details &&
+    typeof details === 'object' &&
+    !Array.isArray(details)
+  ) {
+    const warning = details as Record<string, unknown>;
+    if (
+      typeof warning.identity === 'string' &&
+      warning.identity.length > 0 &&
+      typeof warning.startedAt === 'number' &&
+      Number.isSafeInteger(warning.startedAt) &&
+      warning.startedAt >= 0
+    )
+      return JSON.stringify([
+        'custom',
+        message.customType,
+        'attempt',
+        warning.identity,
+        warning.startedAt,
+      ]);
+  }
+  return undefined;
 }
 
 function messageIdentityKey(

@@ -258,6 +258,7 @@ export class LiveEventNormalizer {
     | {
         messageId: string;
         identityKey?: string;
+        role: string;
         content?: unknown;
         pendingThinking: Map<number, string>;
       }
@@ -313,16 +314,25 @@ export class LiveEventNormalizer {
 
     let messageId: string;
     if (phase === 'started') {
-      this.partialToolCalls.clear();
-      messageId = identityKey
-        ? identityKey
-        : `${this.runtimeEpoch}:${++this.identitySequence}`;
-      this.activeMessage = {
-        messageId,
-        identityKey,
-        pendingThinking: new Map(),
-      };
-    } else if (this.activeMessage) {
+      const preserveAssistant =
+        this.activeMessage?.role === 'assistant' && role !== 'assistant';
+      if (!preserveAssistant) {
+        this.partialToolCalls.clear();
+        messageId = identityKey
+          ? identityKey
+          : `${this.runtimeEpoch}:${++this.identitySequence}`;
+        this.activeMessage = {
+          messageId,
+          identityKey,
+          role,
+          pendingThinking: new Map(),
+        };
+      } else {
+        messageId = identityKey
+          ? identityKey
+          : `${this.runtimeEpoch}:${++this.identitySequence}`;
+      }
+    } else if (this.activeMessage?.role === role) {
       // A responseId is often only present on the final message wrapper. The
       // live ID established by start remains authoritative for this stream.
       messageId = this.activeMessage.messageId;
@@ -333,6 +343,8 @@ export class LiveEventNormalizer {
         : `${this.runtimeEpoch}:${++this.identitySequence}`;
     }
 
+    const activeMessage =
+      this.activeMessage?.role === role ? this.activeMessage : undefined;
     const nativeStopReason =
       directString(message, 'stopReason') ??
       directString(event, 'stopReason') ??
@@ -353,7 +365,7 @@ export class LiveEventNormalizer {
       : Object.hasOwn(event, 'content')
         ? directValue(event, 'content')
         : undefined;
-    let rawContent: unknown = this.activeMessage?.content ?? null;
+    let rawContent: unknown = activeMessage?.content ?? null;
     if (phase === 'started' || phase === 'finished' || role !== 'assistant') {
       // message_end is authoritative; user steering updates also carry their
       // complete message rather than an AssistantMessageEvent delta. A few
@@ -369,8 +381,8 @@ export class LiveEventNormalizer {
           phase === 'finished' &&
           stopReason === 'error' &&
           emptyFinalContent &&
-          this.activeMessage?.content !== undefined &&
-          this.activeMessage.content !== null
+          activeMessage?.content !== undefined &&
+          activeMessage.content !== null
         )
       )
         rawContent = fullContent;
@@ -380,11 +392,11 @@ export class LiveEventNormalizer {
       rawContent = applyAssistantMessageEvent(
         rawContent,
         assistantEventValue as AssistantMessageEvent,
-        this.activeMessage?.pendingThinking ?? new Map(),
+        activeMessage?.pendingThinking ?? new Map(),
       );
     }
     const safeContent = jsonSafe(rawContent, MAX_FRAME_BYTES);
-    if (this.activeMessage) this.activeMessage.content = safeContent;
+    if (activeMessage) activeMessage.content = safeContent;
     const turnId =
       directIdentifier(event, 'turnId') ?? directIdentifier(message, 'turnId');
     const messageData = eventRecord(directValue(message, 'data'));
@@ -435,8 +447,11 @@ export class LiveEventNormalizer {
       ...(safeData === undefined ? {} : { data: safeData }),
     };
     if (phase === 'finished') {
-      this.activeMessage = undefined;
-      this.partialToolCalls.clear();
+      const finishedActiveMessage = this.activeMessage?.role === role;
+      if (finishedActiveMessage) {
+        this.activeMessage = undefined;
+        this.partialToolCalls.clear();
+      }
     }
     return payload;
   }

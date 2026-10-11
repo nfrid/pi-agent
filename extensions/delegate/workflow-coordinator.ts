@@ -528,10 +528,14 @@ export class DelegateWorkflowCoordinator {
     if (this.dependenciesReady(dependencies)) this.jobs.assertAccepting();
 
     const timestamp = this.now();
-    const inheritedCapabilities = plan.predecessor
-      ? this.records.get(plan.predecessor.identity)?.capabilities
+    const predecessor = plan.predecessor
+      ? this.records.get(plan.predecessor.identity)
       : undefined;
+    const inheritedCapabilities = predecessor?.capabilities;
     const capabilities = options.capabilities ?? inheritedCapabilities;
+    // Write permission is part of a continuation's immutable grant. Preserve
+    // explicit false, and inherit a known predecessor grant when omitted.
+    const allowWrites = predecessor?.allowWrites ?? options.allowWrites;
     const record: WorkflowRecord = {
       attempt: copyAttempt(plan.attempt),
       ownerBranchId: this.ownerBranchId,
@@ -545,7 +549,7 @@ export class DelegateWorkflowCoordinator {
       scheduledAt: timestamp,
       route: options.routing?.route ?? options.route,
       routing: copyRouting(options.routing),
-      allowWrites: options.allowWrites,
+      allowWrites,
       capabilities: capabilities ? Object.freeze([...capabilities]) : undefined,
       launched: false,
       cancellationRequested: false,
@@ -566,7 +570,7 @@ export class DelegateWorkflowCoordinator {
               materialize: options.materialize,
               deliveryEpoch: options.deliveryEpoch,
               route: options.route,
-              allowWrites: options.allowWrites,
+              allowWrites,
               capabilities: capabilities ? [...capabilities] : undefined,
               sessionId: options.sessionId,
               processJobId: options.processJobId,
@@ -999,7 +1003,12 @@ export class DelegateWorkflowCoordinator {
         startedAt: metadata.startedAt,
         settledAt,
         route: metadata.route,
-        allowWrites: metadata.allowWrites,
+        allowWrites:
+          metadata.allowWrites ??
+          (metadata.attempt > 1
+            ? this.records.get(`${metadata.logicalId}@${metadata.attempt - 1}`)
+                ?.allowWrites
+            : undefined),
         capabilities: metadata.capabilities
           ? Object.freeze([...metadata.capabilities])
           : undefined,

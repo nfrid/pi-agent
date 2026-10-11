@@ -799,7 +799,8 @@ function projectRun(
   }
   const context = validContext(run.context);
   if (context) projected.context = context;
-  if (run.allowWrites === true) projected.allowWrites = true;
+  if (typeof run.allowWrites === 'boolean')
+    projected.allowWrites = run.allowWrites;
   const capabilities = childCapabilities(run.capabilities);
   if (capabilities) projected.capabilities = capabilities;
   if (run.isolation === 'shared' || run.isolation === 'worktree')
@@ -1016,7 +1017,9 @@ function workflowStoreAttemptRun(metadata: RecordValue): RecordValue {
     ...(metadata.settledAt === undefined
       ? {}
       : { finishedAt: metadata.settledAt }),
-    allowWrites: metadata.allowWrites === true,
+    ...(typeof metadata.allowWrites === 'boolean'
+      ? { allowWrites: metadata.allowWrites }
+      : {}),
     ...(Array.isArray(metadata.capabilities) &&
     metadata.capabilities.includes('web')
       ? { capabilities: ['web'] }
@@ -1331,7 +1334,8 @@ function projectJobMetadata(job: RecordValue): RecordValue {
   if (state) result.state = state;
   const settledAt = finiteNumber(job.settledAt);
   if (settledAt !== undefined) result.settledAt = settledAt;
-  if (job.allowWrites === true) result.allowWrites = true;
+  if (typeof job.allowWrites === 'boolean')
+    result.allowWrites = job.allowWrites;
   return result;
 }
 
@@ -1999,7 +2003,103 @@ function canonicalOccurrences(
     result[index] = merged;
     for (const key of [...keysFor(previous), ...keys]) indexes.set(key, index);
   }
-  return result;
+  return inheritHistoricalContinuationWriteGrants(result);
+}
+
+function inheritHistoricalContinuationWriteGrants(
+  occurrences: readonly DelegateOccurrence[],
+): DelegateOccurrence[] {
+  const ordered = occurrences.flatMap((occurrence) => {
+    const workflow = isRecord(occurrence.run.workflow)
+      ? occurrence.run.workflow
+      : undefined;
+    const identity = occurrenceWorkflowIdentity(occurrence);
+    const logicalId = isCanonicalWorkflowLogicalId(workflow?.logicalId)
+      ? workflow.logicalId
+      : undefined;
+    const ordinal = workflow?.attempt ?? workflow?.ordinal;
+    return workflow &&
+      identity?.owner &&
+      logicalId &&
+      typeof ordinal === 'number'
+      ? [{ occurrence, workflow, owner: identity.owner, logicalId, ordinal }]
+      : [];
+  });
+  ordered.sort(
+    (left, right) =>
+      left.owner.localeCompare(right.owner) ||
+      left.logicalId.localeCompare(right.logicalId) ||
+      left.ordinal - right.ordinal,
+  );
+
+  const byIdentity = new Map(
+    ordered.map((item) => [
+      `${item.owner}\u0000${item.workflow.identity}`,
+      item,
+    ]),
+  );
+  const grants = new Map<string, boolean>();
+  const inferred = new Map<DelegateOccurrence, DelegateOccurrence>();
+  for (const item of ordered) {
+    const { occurrence, workflow, owner, logicalId, ordinal } = item;
+    const key = `${owner}\u0000${workflow.identity}`;
+    const explicit = [
+      workflow.allowWrites,
+      occurrence.run.allowWrites,
+      occurrence.job?.allowWrites,
+    ].filter((value): value is boolean => typeof value === 'boolean');
+    let allowWrites = explicit.includes(false)
+      ? false
+      : explicit.includes(true)
+        ? true
+        : undefined;
+    const predecessor = ordinal > 1 ? `${logicalId}@${ordinal - 1}` : undefined;
+    const dependencies = Array.isArray(workflow.dependencies)
+      ? workflow.dependencies
+      : [];
+    const predecessorKey = predecessor
+      ? `${owner}\u0000${predecessor}`
+      : undefined;
+    const previous = predecessorKey
+      ? byIdentity.get(predecessorKey)
+      : undefined;
+    const previousSessionId = stringValue(
+      previous?.occurrence.run.sessionId ??
+        (isRecord(previous?.occurrence.run.workflow)
+          ? previous.occurrence.run.workflow.sessionId
+          : undefined),
+      256,
+    );
+    const currentSessionId = stringValue(
+      occurrence.run.sessionId ?? workflow.sessionId,
+      256,
+    );
+    if (
+      allowWrites === undefined &&
+      predecessorKey &&
+      dependencies.includes(predecessor as string) &&
+      grants.get(predecessorKey) === true &&
+      !(
+        previousSessionId &&
+        currentSessionId &&
+        previousSessionId !== currentSessionId
+      )
+    ) {
+      allowWrites = true;
+      inferred.set(occurrence, {
+        ...occurrence,
+        run: {
+          ...occurrence.run,
+          allowWrites: true,
+          workflow: { ...workflow, allowWrites: true },
+        },
+      });
+    }
+    if (allowWrites !== undefined) grants.set(key, allowWrites);
+  }
+  return occurrences.map(
+    (occurrence) => inferred.get(occurrence) ?? occurrence,
+  );
 }
 
 function invocation(
