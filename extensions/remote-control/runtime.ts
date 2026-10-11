@@ -14,6 +14,7 @@ import {
   type RuntimeSnapshotPatch,
 } from '@pi-dashboard/protocol/pi-runtime-protocol';
 import { isGenuineAgentSettlement } from '../shared/runtime/agent-lifecycle';
+import { getNativeSteeringController } from '../shared/runtime/native-steering';
 import { pendingProcessCount } from '../shared/runtime/pending-processes';
 import {
   findScopedServices,
@@ -33,6 +34,7 @@ import {
 } from './external-delivery';
 import { clearSettledBackground, publishSettledBackground } from './live';
 import { LiveEventNormalizer } from './live-event-normalizer';
+import { nativeSteeringContribution } from './native-steering';
 import {
   isQueueDraftCommand,
   QueueDraftStore,
@@ -87,6 +89,7 @@ export function createRemoteControlRuntime(
   const eventNormalizer = new LiveEventNormalizer();
   let context: ExtensionContext | undefined;
   let currentSessionId: string | undefined;
+  let contextGeneration = 0;
   let contextScope: SessionScopeId | undefined;
   let lastError: string | undefined;
   const queueDrafts = new QueueDraftStore();
@@ -285,10 +288,36 @@ export function createRemoteControlRuntime(
       if (replacingScope && previousScope)
         releaseScopedServices(previousScope, previousServices);
       queueDrafts.setSession(nextScope);
+      if (currentSessionId !== nextScope) contextGeneration++;
       context = ctx;
       contextScope = nextScope;
       currentSessionId = nextScope;
-      if (next) cachedSnapshot = next;
+      const bindingGeneration = contextGeneration;
+      nextServices.capabilities.register(
+        nativeSteeringContribution({
+          getContext: () => context,
+          pi,
+          store: queueDrafts,
+          isCurrent: (candidate) =>
+            bindingGeneration === contextGeneration && isCurrent(candidate),
+          publish: (candidate) => {
+            const active = context;
+            if (!active || !isCurrent(candidate) || !isCurrent(active)) return;
+            setContext(active, false);
+            const state = liveState(active);
+            client.sendEvent({
+              type: 'runtime.stateChanged',
+              state,
+              snapshot: snapshotPatch(active, state),
+            });
+          },
+        }),
+      );
+      if (next)
+        cachedSnapshot = {
+          ...next,
+          capabilities: getRuntimeCapabilities(nextScope),
+        };
     } catch (error) {
       if (attemptedBinding) {
         try {
@@ -336,7 +365,9 @@ export function createRemoteControlRuntime(
     if (!isCurrent(ctx) && context !== ctx) return;
     const closingServices = scopedServices;
     const closingScope = contextScope;
+    closingServices.capabilities.unregister('remote-control.native-steering');
     if (closingScope) clearQueueSendObservations(closingScope);
+    contextGeneration++;
     queueDrafts.setSession(undefined);
     queueDrafts.clear();
     context = undefined;
@@ -387,6 +418,16 @@ export function flushQueueDrafts(
     return false;
   runtime.setContext(ctx, false);
   if (!runtime.isCurrent(ctx)) return false;
+  const nativeController = getNativeSteeringController(
+    ctx.sessionManager.getSessionId(),
+  ) as { hasPendingContinuation?: () => boolean } | undefined;
+  if (nativeController?.hasPendingContinuation?.()) return false;
+  if (
+    mode === 'steer' &&
+    typeof ctx.hasPendingMessages === 'function' &&
+    ctx.hasPendingMessages()
+  )
+    return false;
   const flushKey = `${ctx.sessionManager.getSessionId()}:${mode}`;
   const active = activeQueueFlushes.get(runtime) ?? new Set<string>();
   if (active.has(flushKey)) return false;

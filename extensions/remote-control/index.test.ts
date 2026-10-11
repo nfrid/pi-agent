@@ -1549,6 +1549,46 @@ describe('dashboard-owned queue drafts', () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it('defers ordinary steer batching while Pi has pending messages', () => {
+    const runtime = createRemoteControlRuntime({} as ExtensionAPI);
+    if (!runtime) throw new Error('runtime was not created');
+    const sendUserMessage = vi.fn();
+    const context = {
+      cwd: '/tmp',
+      sessionManager: {
+        getSessionId: () => 'native-successor-boundary',
+        getBranch: () => [],
+        getSessionFile: () => undefined,
+        getSessionName: () => undefined,
+        getCwd: () => '/tmp',
+        getLeafId: () => undefined,
+      },
+      getContextUsage: () => undefined,
+      isIdle: () => false,
+      hasPendingMessages: () => true,
+    } as unknown as ExtensionContext;
+    runtime.setContext(context);
+    runtime.queueDrafts.add({
+      clientId: 'later-steer',
+      mode: 'steer',
+      text: 'keep for another boundary',
+    });
+
+    expect(
+      flushQueueDrafts(
+        runtime,
+        { sendUserMessage } as unknown as ExtensionAPI,
+        context,
+        'steer',
+      ),
+    ).toBe(false);
+    expect(sendUserMessage).not.toHaveBeenCalled();
+    expect(runtime.queueDrafts.list()).toMatchObject([
+      { clientId: 'later-steer' },
+    ]);
+    runtime.clearContext(context);
+  });
+
   it('records handoff outcomes, retries known failures, and ignores stale sessions', async () => {
     const sendUserMessage = vi.fn((text: string) => {
       if (text === 'fails') throw new Error('Pi queue rejected message');

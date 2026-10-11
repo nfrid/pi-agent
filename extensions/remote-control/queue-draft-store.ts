@@ -250,6 +250,41 @@ export class QueueDraftStore {
     return publicDraft(draft);
   }
 
+  /** Atomically claim the exact FIFO head for native steering. */
+  claimSteerNow(
+    clientId: string,
+    revision: number,
+  ): StoredQueueDraft | undefined {
+    this.requireSession();
+    const first = [...this.drafts.values()].find(
+      (draft) => draft.mode === 'steer',
+    );
+    if (
+      !first ||
+      first.clientId !== clientId ||
+      first.revision !== revision ||
+      first.mode !== 'steer' ||
+      first.images.length > 0
+    )
+      return undefined;
+    const key = handoffKey(clientId, revision);
+    const previous = this.handoffs.get(key);
+    if (
+      (previous && previous.status !== 'failed') ||
+      (this.handoffs.size >= MAX_QUEUE_DRAFTS && !this.makeHandoffCapacity())
+    )
+      return undefined;
+    const copy = { ...first, images: [...first.images] };
+    this.handoffs.set(key, {
+      clientId,
+      mode: first.mode,
+      text: first.text,
+      revision: first.revision,
+      status: 'handing-off',
+    });
+    return copy;
+  }
+
   /** Claim current revisions without removing editable state during async admission. */
   take(mode: QueueDraftMode): StoredQueueDraft[] {
     this.requireSession();

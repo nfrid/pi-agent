@@ -20,6 +20,10 @@ import {
 } from '@pi-dashboard/protocol';
 import { Type } from 'typebox';
 import { afterEach, expect, it, vi } from 'vitest';
+import {
+  clearAllNativeSteeringControllers,
+  registerNativeSteeringController,
+} from '../shared/runtime/native-steering';
 import { getScopedServices } from '../shared/runtime/scoped-services';
 import { registerSteeringMessageTracking } from '../steering-messages';
 import { dispatchDashboardCommand } from './command-dispatcher';
@@ -30,12 +34,18 @@ import {
   withQueueSendObservation,
 } from './external-delivery';
 import {
+  nativeSteeringContribution,
+  QUEUE_STEER_NOW_ACTION_ID,
+} from './native-steering';
+import { QueueDraftStore } from './queue-draft-store';
+import {
   installRequestClosureBoundary,
   RequestClosureLifecycle,
 } from './request-closure';
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
+  clearAllNativeSteeringControllers('test cleanup');
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
 
@@ -451,6 +461,77 @@ it('queues identical literal steering inputs during a real SDK tool and processe
     ),
   ).toBe(true);
   expect(f.errors).toEqual([]);
+});
+
+it('admits the fake native callback as one SDK steer entry with terminal identity', async () => {
+  const f = await fixture(undefined, false, false, true);
+  const turn = f.session.prompt('Start the tool.');
+  await vi.waitFor(() => expect(f.toolStarted).toHaveBeenCalledOnce());
+  const sessionId = f.manager.getSessionId();
+  const store = new QueueDraftStore();
+  store.setSession(sessionId);
+  store.add({ clientId: 'native-head', mode: 'steer', text: 'native input' });
+  const nativeSteer = vi.fn(
+    async (_text: string, accepted: () => void | Promise<void>) => {
+      await accepted();
+      return { status: 'accepted' as const, steerId: 'steer-1' };
+    },
+  );
+  registerNativeSteeringController(sessionId, {
+    isAvailable: () => true,
+    steer: nativeSteer,
+    close: () => undefined,
+  });
+  const host = {
+    getContext: () => f.ctx,
+    pi: f.pi,
+    store,
+    isCurrent: (ctx: ExtensionContext) => ctx === f.ctx,
+    publish: vi.fn(),
+  };
+  const handler =
+    nativeSteeringContribution(host).actionHandlers?.[
+      QUEUE_STEER_NOW_ACTION_ID
+    ];
+  if (!handler) throw new Error('Native steering handler is missing.');
+  await expect(
+    handler(
+      {
+        actionId: QUEUE_STEER_NOW_ACTION_ID,
+        input: {
+          clientId: 'native-head',
+          revision: 1,
+          expectedSessionId: sessionId,
+        },
+      } as never,
+      {} as never,
+    ),
+  ).resolves.toMatchObject({ accepted: true });
+  expect(nativeSteer).toHaveBeenCalledWith(
+    'native input',
+    expect.any(Function),
+  );
+  expect(store.listHandoffs()).toMatchObject([
+    { clientId: 'native-head', status: 'accepted' },
+  ]);
+  expect(f.contexts).toHaveLength(1);
+  f.releaseTool();
+  await turn;
+  await f.session.waitForIdle();
+  expect(
+    f.contexts
+      .at(-1)
+      ?.messages.filter(
+        (message) =>
+          message.role === 'user' &&
+          JSON.stringify(message.content).includes('native input'),
+      ),
+  ).toHaveLength(1);
+  await vi.waitFor(() =>
+    expect(store.listHandoffs()).toMatchObject([
+      { clientId: 'native-head', status: 'entered' },
+    ]),
+  );
 });
 
 it('queues follow-up before source creation, holds it across SDK idle, and releases only after logical closure', async () => {

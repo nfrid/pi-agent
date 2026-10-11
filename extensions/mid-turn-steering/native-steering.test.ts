@@ -12,13 +12,25 @@ import type {
 import {
   createAgentSession,
   DefaultResourceLoader,
+  type ExtensionAPI,
+  type ExtensionContext,
   type ExtensionFactory,
   ModelRuntime,
   SessionManager,
   SettingsManager,
 } from '@earendil-works/pi-coding-agent';
-import { Type } from 'typebox';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { dispatchDashboardCommand } from '../remote-control/command-dispatcher';
+import { installExternalDeliveryReceipts } from '../remote-control/external-delivery';
+import {
+  NATIVE_STEERING_CAPABILITY_ID,
+  QUEUE_STEER_NOW_ACTION_ID,
+} from '../remote-control/native-steering';
+import {
+  createRemoteControlRuntime,
+  emitState,
+  emitTurnEnd,
+} from '../remote-control/runtime';
 import {
   clearAllNativeSteeringControllers,
   getNativeSteeringController,
@@ -1679,7 +1691,11 @@ describe('native mid-turn steering transport', () => {
     const { factory, sockets } = makeSocketFactory();
     const payloads: JsonRecord[] = [];
     const errors: unknown[] = [];
-    let toolCalls = 0;
+    let remoteRuntime: ReturnType<typeof createRemoteControlRuntime>;
+    let extensionContext: ExtensionContext | undefined;
+    let extensionApi: ExtensionAPI | undefined;
+    let fakeNativeContinuationPending = false;
+    const hasPendingContinuation = vi.fn(() => fakeNativeContinuationPending);
     const nativeStream = createNativeSteeringStream(factory, async (input) => {
       errors.push(new Error(`Unexpected HTTP fallback: ${String(input)}`));
       throw new Error('AgentSession fixture must use its fake WebSocket.');
@@ -1724,10 +1740,13 @@ describe('native mid-turn steering transport', () => {
       ],
     });
     const settings = SettingsManager.inMemory({
+      steeringMode: 'all',
       compaction: { enabled: false },
       retry: { enabled: false },
     });
     const lifecycle: ExtensionFactory = (pi) => {
+      extensionApi = pi;
+      installExternalDeliveryReceipts(pi);
       pi.registerProvider('openai', {
         api: 'openai-responses',
         baseUrl: 'https://api.openai.com/v1',
@@ -1746,18 +1765,33 @@ describe('native mid-turn steering transport', () => {
           false,
         );
       });
-      pi.registerTool({
-        name: 'lookup',
-        label: 'Lookup',
-        description: 'Look up a value.',
-        parameters: Type.Object({ key: Type.String() }),
-        execute: async (_id, params) => {
-          toolCalls++;
-          return {
-            content: [{ type: 'text', text: `found ${params.key}` }],
-            details: {},
-          };
-        },
+      remoteRuntime = createRemoteControlRuntime(pi);
+      if (!remoteRuntime)
+        throw new Error('Remote-control runtime unavailable.');
+      pi.on('session_start', (_event, context) => {
+        extensionContext = context;
+        remoteRuntime?.setContext(context);
+      });
+      pi.on('provider_stream_event', (event, context) => {
+        extensionContext = context;
+        remoteRuntime?.setContext(context, false);
+        const type =
+          event.data && typeof event.data === 'object'
+            ? (event.data as { type?: string }).type
+            : undefined;
+        if (type === 'response.created' && fakeNativeContinuationPending)
+          fakeNativeContinuationPending = false;
+        if (
+          remoteRuntime &&
+          (type === 'response.created' ||
+            type === 'response.completed' ||
+            type === 'response.incomplete' ||
+            type === 'response.failed')
+        )
+          emitState(remoteRuntime, context);
+      });
+      pi.on('turn_end', (_event, context) => {
+        if (remoteRuntime) emitTurnEnd(remoteRuntime, pi, context);
       });
     };
     try {
@@ -1782,7 +1816,7 @@ describe('native mid-turn steering transport', () => {
         settingsManager: settings,
         sessionManager: manager,
         resourceLoader: loader,
-        tools: ['lookup'],
+        noTools: 'all',
       }));
       await session.bindExtensions({
         mode: 'rpc',
@@ -1810,15 +1844,68 @@ describe('native mid-turn steering transport', () => {
         const value = getNativeSteeringController(activeSession.sessionId);
         if (!value?.isAvailable())
           throw new Error('Steering is not available yet.');
+        Object.defineProperty(value, 'hasPendingContinuation', {
+          configurable: true,
+          value: hasPendingContinuation,
+        });
         return value;
       });
-      const accepted = controller.steer('Native request', async () => {
-        const result = await activeSession.steer('Native request');
-        if (result !== 'queued')
-          throw new Error(`Expected queued native input, received ${result}.`);
+      if (!remoteRuntime || !extensionContext)
+        throw new Error('Remote-control session binding is missing.');
+      const sourceContext = extensionContext;
+      expect(
+        remoteRuntime.snapshot().capabilities?.capabilities ?? [],
+      ).toContainEqual(
+        expect.objectContaining({
+          id: NATIVE_STEERING_CAPABILITY_ID,
+          available: true,
+        }),
+      );
+      remoteRuntime.queueDrafts.add({
+        clientId: 'native-a',
+        mode: 'steer',
+        text: 'Native request',
       });
+      remoteRuntime.queueDrafts.add({
+        clientId: 'dashboard-b',
+        mode: 'steer',
+        text: 'Later dashboard steer',
+      });
+      if (!extensionApi) throw new Error('Extension API is missing.');
+      const action = dispatchDashboardCommand(
+        extensionApi,
+        sourceContext,
+        {
+          id: 'native-steer-action',
+          type: 'action.invoke',
+          actionId: QUEUE_STEER_NOW_ACTION_ID,
+          input: {
+            clientId: 'native-a',
+            revision: 1,
+            expectedSessionId: activeSession.sessionId,
+          },
+        },
+        undefined,
+        remoteRuntime.queueDrafts,
+      );
       const steerEvent = await socket.nextSent();
       expect(steerEvent.type).toBe('response.steer');
+      fakeNativeContinuationPending = true;
+      const partialEvents = reasonedSteeredEvents(
+        'resp_agent_partial',
+        'original partial answer',
+      );
+      await emitAll(socket, partialEvents.slice(1, -1));
+      await vi.waitFor(() => expect(extensionContext).not.toBe(sourceContext));
+      const sourceLeaf = sourceContext.sessionManager.getLeafId();
+      if (!sourceLeaf) throw new Error('Missing source leaf.');
+      extensionApi.appendEntry('native-test-progress', { checkpoint: 1 });
+      expect(sourceContext.sessionManager.getLeafId()).not.toBe(sourceLeaf);
+      expect(
+        sourceContext.sessionManager
+          .getBranch()
+          .some((entry) => entry.id === sourceLeaf),
+      ).toBe(true);
       socket.emit({
         type: 'response.steer.accepted',
         sequence_number: 2,
@@ -1827,36 +1914,31 @@ describe('native mid-turn steering transport', () => {
           previous_response_id: 'resp_agent_partial',
         },
       });
-      expect(await accepted).toMatchObject({ status: 'accepted' });
-      await emitAll(
-        socket,
-        reasonedSteeredEvents(
-          'resp_agent_partial',
-          'original partial answer',
-        ).slice(1),
-      );
+      await expect(action).resolves.toMatchObject({ accepted: true });
+      const partialTerminal = partialEvents.at(-1);
+      if (!partialTerminal) throw new Error('Missing steered terminal event.');
+      socket.emit(partialTerminal);
 
       const state = controller as typeof controller & {
         canStartNextRequest(): boolean;
       };
       await vi.waitFor(() => expect(state.canStartNextRequest()).toBe(false));
+      await vi.waitFor(() => expect(hasPendingContinuation).toHaveBeenCalled());
       expect(
         socket.sentEvents.filter((event) => event.type === 'response.create'),
       ).toHaveLength(1);
-      await emitAll(socket, toolEvents('resp_agent_auto_tool'));
-      await vi.waitFor(() => expect(toolCalls).toBe(1));
-      const toolContinuation = await socket.nextSent();
-      expect(toolContinuation).toMatchObject({
-        type: 'response.create',
-        previous_response_id: 'resp_agent_auto_tool',
-      });
-      expect(
-        (toolContinuation.input as JsonRecord[]).filter(
-          (item) =>
-            item.type === 'function_call_output' &&
-            item.call_id === 'call_test_1',
-        ),
-      ).toHaveLength(1);
+      expect(remoteRuntime.queueDrafts.list()).toMatchObject([
+        { clientId: 'dashboard-b', text: 'Later dashboard steer' },
+      ]);
+      await emitAll(
+        socket,
+        textEvents('resp_agent_auto_successor', 'automatic successor answer'),
+      );
+      await vi.waitFor(() =>
+        expect(
+          socket.sentEvents.filter((event) => event.type === 'response.create'),
+        ).toHaveLength(2),
+      );
       const autoInput = payloads[1]?.input;
       if (!Array.isArray(autoInput))
         throw new Error('Missing automatic input history.');
@@ -1877,11 +1959,30 @@ describe('native mid-turn steering transport', () => {
           }),
         ]),
       );
+      expect(JSON.stringify(autoInput)).not.toContain('Later dashboard steer');
 
-      await emitAll(socket, textEvents('resp_agent_final', 'final answer'));
+      const dashboardContinuation = socket.sentEvents
+        .filter((event) => event.type === 'response.create')
+        .at(-1);
+      expect(dashboardContinuation?.type).toBe('response.create');
+      await vi.waitFor(() => expect(payloads).toHaveLength(3));
+      const dashboardInput = payloads[2]?.input;
+      expect(JSON.stringify(dashboardInput)).toContain('Later dashboard steer');
+      expect(
+        JSON.stringify(dashboardInput).match(/Later dashboard steer/g),
+      ).toHaveLength(1);
+      await emitAll(
+        socket,
+        textEvents('resp_agent_dashboard_final', 'dashboard answer'),
+      );
       await promptPromise;
+      await vi.waitFor(() =>
+        expect(remoteRuntime?.queueDrafts.listHandoffs()).toMatchObject([
+          { clientId: 'native-a', status: 'entered' },
+          { clientId: 'dashboard-b', status: 'entered' },
+        ]),
+      );
       expect(errors).toEqual([]);
-      expect(toolCalls).toBe(1);
       expect(
         socket.sentEvents.filter((event) => event.type === 'response.create'),
       ).toHaveLength(2);
@@ -1908,12 +2009,34 @@ describe('native mid-turn steering transport', () => {
           message.role === 'assistant' &&
           Array.isArray(message.content) &&
           message.content.some(
-            (block) => block.type === 'toolCall' && block.name === 'lookup',
+            (block) =>
+              block.type === 'text' &&
+              block.text === 'automatic successor answer',
+          ),
+      );
+      const dashboardIndex = messages.findIndex(
+        (message) =>
+          message.role === 'user' &&
+          Array.isArray(message.content) &&
+          message.content.some(
+            (block) =>
+              block.type === 'text' && block.text === 'Later dashboard steer',
+          ),
+      );
+      const finalIndex = messages.findIndex(
+        (message) =>
+          message.role === 'assistant' &&
+          Array.isArray(message.content) &&
+          message.content.some(
+            (block) =>
+              block.type === 'text' && block.text === 'dashboard answer',
           ),
       );
       expect(partialIndex).toBeGreaterThanOrEqual(0);
       expect(nativeIndex).toBeGreaterThan(partialIndex);
       expect(successorIndex).toBeGreaterThan(nativeIndex);
+      expect(dashboardIndex).toBeGreaterThan(successorIndex);
+      expect(finalIndex).toBeGreaterThan(dashboardIndex);
       const partial = messages[partialIndex];
       if (partial?.role !== 'assistant')
         throw new Error('Missing partial response.');

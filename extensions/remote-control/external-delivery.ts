@@ -238,6 +238,7 @@ export function installExternalSteeringShim(): boolean {
         });
       }
       scope.queued = true;
+      queueSend?.settle({ status: 'accepted' });
     } catch (error) {
       steeringIdentities.delete(nativeMessage);
       throw error;

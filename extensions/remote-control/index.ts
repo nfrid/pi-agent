@@ -374,6 +374,16 @@ export default defineExtension('remote-control', (pi) => {
   onCurrentTransportEvent('queue_update', (_event, ctx) =>
     emitState(runtime, ctx),
   );
+  onCurrentTransportEvent('provider_stream_event', (event, ctx) => {
+    const data = eventRecord(directValue(eventRecord(event), 'data'));
+    if (
+      data.type === 'response.created' ||
+      data.type === 'response.completed' ||
+      data.type === 'response.incomplete' ||
+      data.type === 'response.failed'
+    )
+      emitState(runtime, ctx);
+  });
   pi.on('session_shutdown', (event, ctx) => {
     shutdownRemoteControlRuntime(runtime, event, ctx, stopRuntimeUpdates);
   });
