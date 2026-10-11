@@ -42,6 +42,42 @@ function QueueProbe({
 }
 
 describe('composer queue model', () => {
+  it('uses matching backend handoff evidence for draft status', () => {
+    expect(
+      queuedMessagesForRuntime({
+        queueDrafts: [
+          { clientId: 'q1', mode: 'steer', text: 'inspect this', revision: 2 },
+        ],
+        queueHandoffs: [
+          {
+            clientId: 'q1',
+            mode: 'steer',
+            text: 'inspect this',
+            revision: 2,
+            status: 'failed',
+            detail: 'Pi queue unavailable',
+          },
+          {
+            clientId: 'q1',
+            mode: 'steer',
+            text: 'old revision',
+            revision: 1,
+            status: 'accepted',
+          },
+        ],
+      } as unknown as RuntimeSnapshot),
+    ).toEqual([
+      {
+        id: 'q1',
+        mode: 'steer',
+        text: 'inspect this',
+        revision: 2,
+        status: 'failed',
+        detail: 'Pi queue unavailable',
+      },
+    ]);
+  });
+
   it('normalizes malformed and duplicate server drafts', () => {
     expect(
       queuedMessagesForRuntime({
@@ -188,6 +224,80 @@ describe('composer queue model', () => {
     update(renderer, runtimeWithQueue([]));
     expect(controls.queue).toEqual([]);
     renderer.unmount();
+  });
+
+  it('shows rows found only in handoffs until exact entered evidence arrives', async () => {
+    const item = { id: 'q1', mode: 'steer' as const, text: 'inspect this' };
+    let controls!: QueueControls;
+    let renderer!: ReturnType<typeof create>;
+    const render = (runtime: RuntimeSnapshot) =>
+      createElement(QueueProbe, {
+        runtime,
+        onRender: (next) => {
+          controls = next;
+        },
+      });
+    act(() => {
+      renderer = create(render(runtimeWithQueue([])));
+    });
+    act(() => controls.addOptimistic(item));
+    expect(controls.queue).toEqual([item]);
+    act(() =>
+      renderer.update(
+        render({
+          ...runtimeWithQueue([]),
+          queueHandoffs: [
+            {
+              clientId: item.id,
+              mode: item.mode,
+              text: item.text,
+              revision: 1,
+              status: 'accepted',
+            },
+          ],
+        }),
+      ),
+    );
+    expect(controls.queue).toEqual([
+      { ...item, revision: 1, status: 'accepted' },
+    ]);
+    act(() =>
+      renderer.update(
+        render({
+          ...runtimeWithQueue([]),
+          queueHandoffs: [
+            {
+              clientId: item.id,
+              mode: item.mode,
+              text: item.text,
+              revision: 1,
+              status: 'entered',
+            },
+          ],
+        }),
+      ),
+    );
+    expect(controls.queue).toEqual([]);
+    renderer.unmount();
+  });
+
+  it('keeps the newest editable revision ahead of older handoff evidence', () => {
+    expect(
+      queuedMessagesForRuntime({
+        queueDrafts: [
+          { clientId: 'q1', mode: 'steer', text: 'new text', revision: 2 },
+        ],
+        queueHandoffs: [
+          {
+            clientId: 'q1',
+            mode: 'steer',
+            text: 'old text',
+            revision: 1,
+            status: 'accepted',
+          },
+        ],
+      } as unknown as RuntimeSnapshot),
+    ).toEqual([{ id: 'q1', mode: 'steer', text: 'new text', revision: 2 }]);
   });
 
   it('rolls back only an unconfirmed optimistic row on command failure', async () => {

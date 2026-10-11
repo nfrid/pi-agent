@@ -26,9 +26,18 @@ import { recordHarnessFailure } from '../shared/telemetry';
 import { BridgeClient } from './bridge-client';
 import { expandDashboardInput } from './command-adapter';
 import { dispatchDashboardCommand } from './command-dispatcher';
+import {
+  clearQueueSendObservations,
+  type QueueSendSettlement,
+  withQueueSendObservation,
+} from './external-delivery';
 import { clearSettledBackground, publishSettledBackground } from './live';
 import { LiveEventNormalizer } from './live-event-normalizer';
-import { isQueueDraftCommand, QueueDraftStore } from './queue-draft-store';
+import {
+  isQueueDraftCommand,
+  QueueDraftStore,
+  type StoredQueueDraft,
+} from './queue-draft-store';
 import { registerRemoteControlCapability } from './register-capability';
 import {
   composerCommandsSnapshot,
@@ -168,6 +177,10 @@ export function createRemoteControlRuntime(
         : undefined,
       queueDrafts:
         queueDrafts.getSessionId() === sessionId ? queueDrafts.list() : [],
+      queueHandoffs:
+        queueDrafts.getSessionId() === sessionId
+          ? queueDrafts.listHandoffs()
+          : [],
       composerCommands: composerCommandsSnapshot(pi),
       capabilities: capabilitiesFor(services),
       extensionSurfaces: services.liveSurfaceHub.snapshot(),
@@ -260,7 +273,10 @@ export function createRemoteControlRuntime(
       const shouldRefresh =
         refreshSnapshot || previousScope === undefined || replacingScope;
       const next = shouldRefresh ? snapshotFrom(ctx, nextServices) : undefined;
-      if (replacingScope) eventNormalizer.reset();
+      if (replacingScope) {
+        if (previousScope) clearQueueSendObservations(previousScope);
+        eventNormalizer.reset();
+      }
       attemptedBinding = nextServices !== previousServices;
       if (attemptedBinding) client.bindServices(nextServices.liveSurfaceHub);
       nextServices.dashboardUsage = usageBroker;
@@ -320,6 +336,7 @@ export function createRemoteControlRuntime(
     if (!isCurrent(ctx) && context !== ctx) return;
     const closingServices = scopedServices;
     const closingScope = contextScope;
+    if (closingScope) clearQueueSendObservations(closingScope);
     queueDrafts.setSession(undefined);
     queueDrafts.clear();
     context = undefined;
@@ -354,6 +371,8 @@ export function emitTurnEnd(
   if (!flushQueueDrafts(runtime, pi, ctx, 'steer')) emitState(runtime, ctx);
 }
 
+const activeQueueFlushes = new WeakMap<object, Set<string>>();
+
 export function flushQueueDrafts(
   runtime: RemoteControlRuntime,
   pi: ExtensionAPI,
@@ -368,34 +387,97 @@ export function flushQueueDrafts(
     return false;
   runtime.setContext(ctx, false);
   if (!runtime.isCurrent(ctx)) return false;
+  const flushKey = `${ctx.sessionManager.getSessionId()}:${mode}`;
+  const active = activeQueueFlushes.get(runtime) ?? new Set<string>();
+  if (active.has(flushKey)) return false;
   const drafts = runtime.queueDrafts.take(mode);
   if (drafts.length === 0) return false;
+  active.add(flushKey);
+  activeQueueFlushes.set(runtime, active);
   const getCommands = (
     pi as ExtensionAPI & { getCommands?: ExtensionAPI['getCommands'] }
   ).getCommands;
   const commands = getCommands?.call(pi) ?? [];
-  let failedAt = drafts.length;
-  for (const [index, draft] of drafts.entries()) {
+  void (async () => {
     try {
-      const expanded = expandDashboardInput(draft.text, commands);
-      pi.sendUserMessage(
-        (draft.images.length > 0
-          ? [
-              ...(expanded ? [{ type: 'text' as const, text: expanded }] : []),
-              ...draft.images,
-            ]
-          : expanded) as Parameters<ExtensionAPI['sendUserMessage']>[0],
-        { deliverAs: draft.mode },
-      );
-    } catch {
-      failedAt = index;
-      break;
+      let draft: StoredQueueDraft | undefined = drafts[0];
+      while (draft) {
+        const currentDraft = draft;
+        let settleAdmission!: (outcome: QueueSendSettlement) => void;
+        const admission = new Promise<QueueSendSettlement>((resolve) => {
+          settleAdmission = resolve;
+        });
+        try {
+          const expanded = expandDashboardInput(currentDraft.text, commands);
+          const { result, observed } = withQueueSendObservation(
+            () =>
+              pi.sendUserMessage(
+                (currentDraft.images.length > 0
+                  ? [
+                      ...(expanded
+                        ? [{ type: 'text' as const, text: expanded }]
+                        : []),
+                      ...currentDraft.images,
+                    ]
+                  : expanded) as Parameters<ExtensionAPI['sendUserMessage']>[0],
+                { deliverAs: currentDraft.mode },
+              ),
+            settleAdmission,
+            () => resolveQueueHandoff(runtime, ctx, currentDraft, 'entered'),
+          );
+          const possiblePromise: unknown = result;
+          if (
+            possiblePromise &&
+            typeof (possiblePromise as PromiseLike<unknown>).then === 'function'
+          ) {
+            void Promise.resolve(possiblePromise).then(
+              () => settleAdmission({ status: 'accepted' }),
+              (error: unknown) =>
+                settleAdmission({
+                  status: 'uncertain',
+                  detail:
+                    error instanceof Error ? error.message : String(error),
+                }),
+            );
+          } else if (!observed) {
+            settleAdmission({
+              status: 'uncertain',
+              detail: 'Pi did not expose a queue-send outcome.',
+            });
+          }
+        } catch (error) {
+          if (runtime.isCurrent(ctx))
+            runtime.queueDrafts.resolveHandoff(
+              currentDraft,
+              'failed',
+              error instanceof Error ? error.message : String(error),
+            );
+          break;
+        }
+        const outcome = await admission;
+        if (runtime.isCurrent(ctx))
+          resolveQueueHandoff(
+            runtime,
+            ctx,
+            currentDraft,
+            outcome.status,
+            outcome.status === 'uncertain' ? outcome.detail : undefined,
+          );
+        if (outcome.status === 'uncertain' || !runtime.isCurrent(ctx)) break;
+        draft = runtime.queueDrafts.take(mode)[0];
+      }
+      if (runtime.isCurrent(ctx)) emitState(runtime, ctx);
+    } finally {
+      active.delete(flushKey);
     }
-  }
-  // A send may synchronously trigger a session replacement. Never restore an
-  // old session's drafts into the replacement, and never reinstall its cache.
-  if (failedAt < drafts.length && runtime.isCurrent(ctx))
-    runtime.queueDrafts.restore(drafts.slice(failedAt));
+  })().catch((error: unknown) => {
+    recordHarnessFailure(
+      'remote-control',
+      'queue-admission-worker-failed',
+      error,
+      flushKey,
+    );
+  });
   if (runtime.isCurrent(ctx)) {
     runtime.setContext(ctx, false);
     if (runtime.isCurrent(ctx)) {
@@ -408,6 +490,25 @@ export function flushQueueDrafts(
     }
   }
   return true;
+}
+
+function resolveQueueHandoff(
+  runtime: RemoteControlRuntime,
+  ctx: ExtensionContext,
+  draft: StoredQueueDraft,
+  status: 'accepted' | 'entered' | 'uncertain',
+  detail?: string,
+): void {
+  if (!runtime.isCurrent(ctx)) return;
+  runtime.queueDrafts.resolveHandoff(draft, status, detail);
+  runtime.setContext(ctx, false);
+  if (!runtime.isCurrent(ctx)) return;
+  const state = liveState(ctx);
+  runtime.client.sendEvent({
+    type: 'runtime.stateChanged',
+    state,
+    snapshot: runtime.snapshotPatch?.(ctx, state) ?? { liveState: state },
+  });
 }
 
 export function emitState(

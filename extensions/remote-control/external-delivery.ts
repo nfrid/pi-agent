@@ -27,12 +27,129 @@ type SteeringScope = {
 };
 type SteeringIdentity = { deliveryId: string; sessionId: string };
 const steeringScope = new AsyncLocalStorage<SteeringScope>();
+export type QueueSendSettlement =
+  | { status: 'accepted' }
+  | { status: 'uncertain'; detail: string };
+const queueSendScope = new AsyncLocalStorage<{
+  settle(outcome: QueueSendSettlement): void;
+  entered(): void;
+}>();
+const queueObservationKey = Symbol.for(
+  'pi.remote-control.queue-entry-observations',
+);
+const observationGlobal = globalThis as unknown as Record<symbol, unknown>;
+let queueEntryObservations = observationGlobal[queueObservationKey] as
+  | WeakMap<object, () => void>
+  | undefined;
+if (!queueEntryObservations) {
+  queueEntryObservations = new WeakMap();
+  observationGlobal[queueObservationKey] = queueEntryObservations;
+}
+const sharedQueueEntryObservations = queueEntryObservations as WeakMap<
+  object,
+  () => void
+>;
+const queuedMessagesSeen = new WeakSet<object>();
+const queueAgentShimKey = Symbol.for('pi.remote-control.queue-agent-observer');
+const pendingQueueMessages = new Map<
+  string,
+  Array<{ message: object; entered(): void }>
+>();
 const steeringIdentities = new WeakMap<object, SteeringIdentity>();
 const pendingSteeringMessages = new Map<
   string,
   Array<{ message: object; identity: SteeringIdentity }>
 >();
 const steeringShimKey = Symbol.for('pi.remote-control.external-steering');
+
+/** Run one extension send with identity through the SDK method that hides its promise. */
+export function withQueueSendObservation<T>(
+  send: () => T,
+  settle: (outcome: QueueSendSettlement) => void,
+  entered: () => void,
+): { result: T; observed: boolean } {
+  const observed = installExternalSteeringShim();
+  let didEnter = false;
+  const notifyEntered = () => {
+    if (didEnter) return;
+    didEnter = true;
+    entered();
+  };
+  return {
+    result: queueSendScope.run({ settle, entered: notifyEntered }, send),
+    observed,
+  };
+}
+
+type QueueAgentObservationState = {
+  originals: Map<string, (...args: unknown[]) => unknown>;
+  wrappers?: Map<string, (...args: unknown[]) => unknown>;
+  observe?: (args: unknown[]) => void;
+};
+
+export function installQueueAgentObservation(session: AgentSession): boolean {
+  const agent = session.agent as unknown as Record<string | symbol, unknown>;
+  const existing = agent[queueAgentShimKey] as
+    | QueueAgentObservationState
+    | undefined;
+  const state: QueueAgentObservationState = existing ?? {
+    originals: new Map(),
+  };
+  let wrappers = state.wrappers;
+  if (!wrappers) {
+    wrappers = new Map();
+    state.wrappers = wrappers;
+  }
+  const names = ['steer', 'followUp', 'prompt'];
+  if (
+    names.some(
+      (name) =>
+        typeof agent[name] !== 'function' ||
+        (wrappers.has(name) && agent[name] !== wrappers.get(name)),
+    )
+  )
+    return false;
+  state.observe = (args) => {
+    const entered = queueSendScope.getStore()?.entered;
+    if (!entered) return;
+    const message = args[0];
+    const messages = Array.isArray(message) ? message : [message];
+    for (const item of messages)
+      if (
+        item &&
+        typeof item === 'object' &&
+        (item as { role?: unknown }).role === 'user'
+      )
+        sharedQueueEntryObservations.set(item, entered);
+  };
+  const changed: string[] = [];
+  try {
+    for (const name of names) {
+      const current = agent[name] as (...args: unknown[]) => unknown;
+      const wrapped = wrappers.get(name);
+      if (wrapped && current === wrapped) continue;
+      const original = state.originals.get(name) ?? current;
+      state.originals.set(name, original);
+      const next = function (this: unknown, ...args: unknown[]) {
+        state.observe?.(args);
+        return original.apply(this, args);
+      };
+      agent[name] = next;
+      wrappers.set(name, next);
+      changed.push(name);
+    }
+    if (!existing)
+      Object.defineProperty(agent, queueAgentShimKey, { value: state });
+    return true;
+  } catch {
+    for (const name of changed) {
+      agent[name] = state.originals.get(name);
+      wrappers.delete(name);
+      state.originals.delete(name);
+    }
+    return false;
+  }
+}
 
 /** Only public methods, and only inside an authenticated external dispatch. */
 export function installExternalSteeringShim(): boolean {
@@ -54,7 +171,22 @@ export function installExternalSteeringShim(): boolean {
     options,
   ) {
     const scope = steeringScope.getStore();
-    if (!scope) return original.call(this, content, options);
+    if (!scope) {
+      const queueSend = queueSendScope.getStore();
+      if (queueSend && !installQueueAgentObservation(this))
+        throw new Error('Native queue identity observation is unavailable.');
+      const result = original.call(this, content, options);
+      if (queueSend)
+        void Promise.resolve(result).then(
+          () => queueSend.settle({ status: 'accepted' }),
+          (error: unknown) =>
+            queueSend.settle({
+              status: 'uncertain',
+              detail: error instanceof Error ? error.message : String(error),
+            }),
+        );
+      return result;
+    }
     if (scope.queued || options?.deliverAs !== 'steer')
       throw new Error('Invalid external steering dispatch.');
     if (
@@ -85,6 +217,9 @@ export function installExternalSteeringShim(): boolean {
       sessionId: scope.sessionId,
     };
     steeringIdentities.set(nativeMessage, identity);
+    const queueSend = queueSendScope.getStore();
+    if (queueSend)
+      sharedQueueEntryObservations.set(nativeMessage, queueSend.entered);
     markLogicalSteering(nativeMessage);
     try {
       if (this.isStreaming) this.agent.steer(nativeMessage);
@@ -222,8 +357,26 @@ export async function withExternalSteering<T>(
   return result;
 }
 
+export function clearQueueSendObservations(sessionId: string): void {
+  pendingQueueMessages.delete(sessionId);
+  pendingSteeringMessages.delete(sessionId);
+}
+
 export function installExternalDeliveryReceipts(pi: ExtensionAPI): void {
   pi.on('message_end', (event, ctx) => {
+    const entered = sharedQueueEntryObservations.get(event.message);
+    if (
+      entered &&
+      event.message.role === 'user' &&
+      !queuedMessagesSeen.has(event.message)
+    ) {
+      queuedMessagesSeen.add(event.message);
+      sharedQueueEntryObservations.delete(event.message);
+      const sessionId = ctx.sessionManager.getSessionId();
+      const pending = pendingQueueMessages.get(sessionId) ?? [];
+      pending.push({ message: event.message, entered });
+      pendingQueueMessages.set(sessionId, pending.slice(-32));
+    }
     const identity = steeringIdentities.get(event.message);
     if (
       identity &&
@@ -232,7 +385,7 @@ export function installExternalDeliveryReceipts(pi: ExtensionAPI): void {
     ) {
       const pending = pendingSteeringMessages.get(identity.sessionId) ?? [];
       pending.push({ message: event.message, identity });
-      pendingSteeringMessages.set(identity.sessionId, pending);
+      pendingSteeringMessages.set(identity.sessionId, pending.slice(-32));
     }
     const dispatch = dispatchScope.getStore();
     if (!dispatch || dispatch.sawUser || event.message.role !== 'user') return;
@@ -242,6 +395,20 @@ export function installExternalDeliveryReceipts(pi: ExtensionAPI): void {
   });
   pi.on('context', (_event, ctx) => {
     const sessionId = ctx.sessionManager.getSessionId();
+    const queued = pendingQueueMessages.get(sessionId) ?? [];
+    if (queued.length) {
+      const branch = ctx.sessionManager.getBranch();
+      const unresolved = queued.filter(({ message, entered }) => {
+        const entries = branch.filter(
+          (entry) => entry.type === 'message' && entry.message === message,
+        );
+        if (entries.length !== 1) return true;
+        entered();
+        return false;
+      });
+      if (unresolved.length) pendingQueueMessages.set(sessionId, unresolved);
+      else pendingQueueMessages.delete(sessionId);
+    }
     const pending = pendingSteeringMessages.get(sessionId) ?? [];
     if (pending.length) {
       const branch = ctx.sessionManager.getBranch();

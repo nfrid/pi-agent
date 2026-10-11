@@ -16,39 +16,91 @@ import { Button as AriaButton } from 'react-aria-components';
 import { errorMessage } from '../../shared/lib/error-message';
 import styles from './queue.module.css';
 
+export type QueueHandoffStatus =
+  | 'handing-off'
+  | 'accepted'
+  | 'entered'
+  | 'failed'
+  | 'uncertain';
+
 export type QueuedMessage = {
   id: string;
   mode: 'steer' | 'followUp';
   text: string;
   imageCount?: number;
+  revision?: number;
+  status?: QueueHandoffStatus;
+  detail?: string;
 };
 
 export function queuedMessagesForRuntime(
   runtime: RuntimeSnapshot | undefined,
 ): readonly QueuedMessage[] {
-  const queue = runtime?.queueDrafts;
-  if (!Array.isArray(queue)) return [];
-  const seen = new Set<string>();
-  return queue.flatMap((item) => {
+  const drafts = Array.isArray(runtime?.queueDrafts) ? runtime.queueDrafts : [];
+  const handoffs = Array.isArray(runtime?.queueHandoffs)
+    ? runtime.queueHandoffs
+    : [];
+  const byId = new Map<string, QueuedMessage>();
+  const add = (
+    item: {
+      clientId: string;
+      mode: 'steer' | 'followUp';
+      text: string;
+      revision?: number;
+      imageCount?: number;
+      detail?: string;
+    },
+    status?: QueueHandoffStatus,
+    detail?: string,
+  ) => {
+    if (!item.clientId || typeof item.text !== 'string') return;
+    const next: QueuedMessage = {
+      id: item.clientId,
+      mode: item.mode,
+      text: item.text,
+      ...(item.imageCount ? { imageCount: item.imageCount } : {}),
+      ...(typeof item.revision === 'number' ? { revision: item.revision } : {}),
+      ...(status
+        ? {
+            status,
+            ...((detail ?? item.detail)
+              ? { detail: detail ?? item.detail }
+              : {}),
+          }
+        : {}),
+    };
+    const previous = byId.get(item.clientId);
+    if ((previous?.revision ?? 0) > (next.revision ?? 0)) return;
+    byId.set(item.clientId, next);
+  };
+  const seenDraftIds = new Set<string>();
+  for (const item of drafts) {
     if (
-      !item ||
-      typeof item.clientId !== 'string' ||
-      item.clientId.length === 0 ||
-      (item.mode !== 'steer' && item.mode !== 'followUp') ||
-      typeof item.text !== 'string' ||
-      seen.has(item.clientId)
+      item &&
+      typeof item.clientId === 'string' &&
+      (item.mode === 'steer' || item.mode === 'followUp') &&
+      typeof item.text === 'string' &&
+      !seenDraftIds.has(item.clientId)
+    ) {
+      seenDraftIds.add(item.clientId);
+      const handoff = handoffs.find(
+        (candidate) =>
+          candidate.clientId === item.clientId &&
+          candidate.revision === item.revision,
+      );
+      if (handoff?.status !== 'entered')
+        add(item, handoff?.status, handoff?.detail);
+    }
+  }
+  for (const handoff of handoffs) {
+    if (
+      handoff.status !== 'entered' &&
+      handoff.status !== 'failed' &&
+      (handoff.mode === 'steer' || handoff.mode === 'followUp')
     )
-      return [];
-    seen.add(item.clientId);
-    return [
-      {
-        id: item.clientId,
-        mode: item.mode,
-        text: item.text,
-        ...(item.imageCount ? { imageCount: item.imageCount } : {}),
-      },
-    ];
-  });
+      add(handoff, handoff.status);
+  }
+  return [...byId.values()];
 }
 
 /** Add or replace a queue item without creating duplicate client IDs. */
@@ -135,7 +187,8 @@ export function shouldQueueComposerMessage(
 export function useComposerQueue(runtime: RuntimeSnapshot | undefined) {
   const serverQueue = queuedMessagesForRuntime(runtime);
   const serverQueueKnown = Array.isArray(runtime?.queueDrafts);
-  const serverQueueKey = JSON.stringify(serverQueue);
+  const handoffsKey = JSON.stringify(runtime?.queueHandoffs ?? []);
+  const serverQueueKey = JSON.stringify([serverQueue, handoffsKey]);
   const runtimeKey = runtime
     ? `${runtime.runtimeId}:${runtime.session.id}`
     : undefined;
@@ -161,13 +214,22 @@ export function useComposerQueue(runtime: RuntimeSnapshot | undefined) {
     serverQueueRef.current = serverQueue;
     if (serverQueueKeyRef.current === serverQueueKey) return;
     serverQueueKeyRef.current = serverQueueKey;
+    const handoffIds = new Set(
+      (runtime?.queueHandoffs ?? []).map((handoff) => handoff.clientId),
+    );
     for (const id of awaitingRef.current.keys())
-      if (serverQueue.some((item) => item.id === id))
+      if (serverQueue.some((item) => item.id === id) || handoffIds.has(id))
         awaitingRef.current.delete(id);
     setQueue(
       mergeQueuedMessages(serverQueue, [...awaitingRef.current.values()]),
     );
-  }, [runtimeKey, serverQueue, serverQueueKey, serverQueueKnown]);
+  }, [
+    runtime?.queueHandoffs,
+    runtimeKey,
+    serverQueue,
+    serverQueueKey,
+    serverQueueKnown,
+  ]);
 
   const addOptimistic = useCallback((item: QueuedMessage) => {
     awaitingRef.current.set(item.id, item);
@@ -199,6 +261,78 @@ export function useComposerQueue(runtime: RuntimeSnapshot | undefined) {
   };
 }
 
+export function QueueModeIcon({ mode }: { mode: QueuedMessage['mode'] }) {
+  return mode === 'steer' ? (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+    >
+      <path
+        d="M2 8h10M8 3l5 5-5 5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  ) : (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+    >
+      <circle cx="8" cy="8" r="5.75" stroke="currentColor" strokeWidth="1.5" />
+      <path
+        d="M8 4.5V8l2.5 1.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function QueueStatusIcon({
+  status,
+}: {
+  status: QueueHandoffStatus | undefined;
+}) {
+  if (status === 'failed' || status === 'uncertain')
+    return <span aria-hidden="true">!</span>;
+  if (status === 'entered') return <span aria-hidden="true">✓</span>;
+  if (status === 'accepted' || status === 'handing-off')
+    return <span aria-hidden="true">·</span>;
+  return <span aria-hidden="true">◷</span>;
+}
+
+function ActionIcon({ kind }: { kind: 'save' | 'edit' | 'remove' }) {
+  const paths = {
+    save: <path d="M3 2.75h8l2 2v8.5H3zM5 2.75v4h6v-4M5 13.25V9h6v4.25" />,
+    edit: <path d="m3 11.5-.5 2 2-.5 8-8-1.5-1.5zM10 4l1.5 1.5" />,
+    remove: <path d="M3 4.5h10M6 4.5v-2h4v2m-5 0 .5 9h5l.5-9m-4 2v5m2-5v5" />,
+  }[kind];
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {paths}
+    </svg>
+  );
+}
+
 export function QueuePanel({
   runtimeId,
   items,
@@ -212,6 +346,11 @@ export function QueuePanel({
   const [editingId, setEditingId] = useState<string>();
   const [editingText, setEditingText] = useState('');
   const [error, setError] = useState<string>();
+  const locked = (item: QueuedMessage) =>
+    item.status === 'handing-off' ||
+    item.status === 'accepted' ||
+    item.status === 'entered' ||
+    item.status === 'uncertain';
   const beginEdit = (item: QueuedMessage) => {
     setEditingId(item.id);
     setEditingText(item.text);
@@ -258,21 +397,41 @@ export function QueuePanel({
       className={`queue-panel ${styles.panel}`}
       aria-label="Queued messages"
     >
-      <div className={styles.heading}>
-        <span className="eyebrow">Queue</span>
-        <span>{items.length} waiting</span>
-      </div>
       <div className={styles.list}>
         {items.map((item) => {
           const editing = editingId === item.id;
+          const itemLocked = locked(item);
+          const modeName = item.mode === 'steer' ? 'steer' : 'follow-up';
+          const statusLabel = item.status
+            ? {
+                'handing-off': 'Sending to Pi',
+                accepted: 'Accepted by Pi, not confirmed applied',
+                entered: 'Entered the session',
+                failed: 'Could not send',
+                uncertain: 'Send outcome unknown',
+              }[item.status]
+            : 'Waiting in queue';
           return (
-            <div className={styles.item} key={item.id}>
-              <span className={`queue-${item.mode} ${styles.mode}`}>
-                {item.mode === 'steer' ? 'steer' : 'follow-up'}
+            <fieldset
+              className={styles.item}
+              key={item.id}
+              aria-label={`Queued ${modeName} message: ${item.text}`}
+            >
+              <span
+                className={`queue-${item.mode} ${styles.mode}`}
+                title={
+                  item.mode === 'steer' ? 'Steer current work' : 'Send later'
+                }
+                role="img"
+                aria-label={
+                  item.mode === 'steer' ? 'Steer current work' : 'Send later'
+                }
+              >
+                <QueueModeIcon mode={item.mode} />
               </span>
               {editing ? (
                 <input
-                  aria-label={`Edit queued ${item.mode} message`}
+                  aria-label={`Edit queued ${modeName} message`}
                   value={editingText}
                   onChange={(event) => setEditingText(event.target.value)}
                   onKeyDown={(event) => {
@@ -282,7 +441,7 @@ export function QueuePanel({
                     }
                     if (event.key === 'Escape') setEditingId(undefined);
                   }}
-                  disabled={mutation.isPending}
+                  disabled={mutation.isPending || itemLocked}
                 />
               ) : (
                 <span className={styles.text}>
@@ -293,39 +452,57 @@ export function QueuePanel({
                       {item.imageCount === 1 ? '' : 's'} attached
                     </small>
                   ) : null}
+                  {item.detail ? (
+                    <small className={styles.detail}>{item.detail}</small>
+                  ) : null}
                 </span>
               )}
+              <span
+                className={`${styles.status} ${item.status === 'failed' || item.status === 'uncertain' ? styles.statusError : ''}`}
+                title={statusLabel}
+                role="img"
+                aria-label={statusLabel}
+              >
+                <QueueStatusIcon status={item.status} />
+              </span>
               <div className={styles.actions}>
                 {editing ? (
                   <AriaButton
                     type="button"
+                    aria-label={`Save queued ${modeName} message`}
+                    data-tooltip="Save"
                     isDisabled={
+                      itemLocked ||
                       mutation.isPending ||
                       (!editingText.trim() && !item.imageCount)
                     }
                     onPress={() => void save(item)}
                   >
-                    Save
+                    <ActionIcon kind="save" />
                   </AriaButton>
                 ) : (
                   <AriaButton
                     type="button"
-                    isDisabled={mutation.isPending}
+                    aria-label={`Edit queued ${modeName} message`}
+                    data-tooltip="Edit"
+                    isDisabled={itemLocked || mutation.isPending}
                     onPress={() => beginEdit(item)}
                   >
-                    Edit
+                    <ActionIcon kind="edit" />
                   </AriaButton>
                 )}
                 <AriaButton
                   type="button"
                   className="queue-remove"
-                  isDisabled={mutation.isPending}
+                  aria-label={`Remove queued ${modeName} message`}
+                  data-tooltip="Remove"
+                  isDisabled={itemLocked || mutation.isPending}
                   onPress={() => void remove(item)}
                 >
-                  Remove
+                  <ActionIcon kind="remove" />
                 </AriaButton>
               </div>
-            </div>
+            </fieldset>
           );
         })}
       </div>

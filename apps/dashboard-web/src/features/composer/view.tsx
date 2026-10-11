@@ -29,6 +29,7 @@ import { useComposerDraft } from './draft';
 import { AgentPicker } from './draft-pickers';
 import {
   newQueueId,
+  QueueModeIcon,
   QueuePanel,
   queueCommand,
   shouldShowQueuePanel,
@@ -457,7 +458,12 @@ export function Composer({
             {canSteer && (
               <AriaButton
                 type="button"
-                aria-label="Steer current work instead of following up later"
+                aria-label={
+                  mode === 'steer' ? 'Steer current work' : 'Send later'
+                }
+                data-tooltip={
+                  mode === 'steer' ? 'Steer current work' : 'Send later'
+                }
                 aria-pressed={mode === 'steer'}
                 className={mode === 'steer' ? 'selected' : ''}
                 onPress={() =>
@@ -466,7 +472,7 @@ export function Composer({
                   )
                 }
               >
-                {mode === 'steer' ? 'Steer' : 'Later'}
+                <QueueModeIcon mode={mode === 'steer' ? 'steer' : 'followUp'} />
               </AriaButton>
             )}
             <ContextIndicator

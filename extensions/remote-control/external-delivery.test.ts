@@ -26,6 +26,8 @@ import { dispatchDashboardCommand } from './command-dispatcher';
 import {
   installExternalDeliveryReceipts,
   installExternalSteeringShim,
+  installQueueAgentObservation,
+  withQueueSendObservation,
 } from './external-delivery';
 import {
   installRequestClosureBoundary,
@@ -191,6 +193,8 @@ async function fixture(
   return {
     root,
     session,
+    pi,
+    ctx,
     manager,
     contexts,
     errors,
@@ -270,6 +274,130 @@ async function fixture(
     },
   };
 }
+
+it('observes the SDK send promise hidden by the extension API wrapper', async () => {
+  const f = await fixture();
+  const outcomes: unknown[] = [];
+  const entries: string[] = [];
+  const send = withQueueSendObservation(
+    () =>
+      f.pi.sendUserMessage('observed queue input', { deliverAs: 'followUp' }),
+    (outcome) => outcomes.push(outcome),
+    () => entries.push('entered'),
+  );
+  expect(send.observed).toBe(true);
+  expect(send.result).toBeUndefined();
+  await vi.waitFor(() => expect(outcomes).toEqual([{ status: 'accepted' }]));
+  await vi.waitFor(() => expect(entries).toEqual(['entered']));
+  expect(
+    f.contexts
+      .at(-1)
+      ?.messages.some(
+        (message) =>
+          message.role === 'user' &&
+          (typeof message.content === 'string'
+            ? message.content === 'observed queue input'
+            : message.content.some(
+                (part) =>
+                  part.type === 'text' && part.text === 'observed queue input',
+              )),
+      ),
+  ).toBe(true);
+});
+
+it('refreshes retained agent wrappers after extension module reinstall', async () => {
+  const steer = vi.fn();
+  const agent = {
+    steer,
+    followUp: vi.fn(),
+    prompt: vi.fn(),
+  };
+  const session = { agent } as unknown as AgentSession;
+  expect(installQueueAgentObservation(session)).toBe(true);
+
+  vi.resetModules();
+  const reloaded = await import('./external-delivery.js');
+  expect(reloaded.installQueueAgentObservation(session)).toBe(true);
+  const message = { role: 'user', content: 'same native object' };
+  const handlers = new Map<
+    string,
+    (event: unknown, ctx: ExtensionContext) => void
+  >();
+  reloaded.installExternalDeliveryReceipts({
+    on: (
+      event: string,
+      handler: (value: unknown, ctx: ExtensionContext) => void,
+    ) => handlers.set(event, handler),
+  } as unknown as ExtensionAPI);
+  const entered = vi.fn();
+  reloaded.withQueueSendObservation(
+    () => agent.steer(message),
+    () => undefined,
+    entered,
+  );
+  const branch = [{ id: 'entry-after-reload', type: 'message', message }];
+  const ctx = {
+    sessionManager: {
+      getSessionId: () => 'reload-session',
+      getBranch: () => branch,
+      getEntries: () => branch,
+    },
+  } as unknown as ExtensionContext;
+  handlers.get('message_end')?.({ message }, ctx);
+  handlers.get('context')?.({}, ctx);
+  expect(entered).toHaveBeenCalledOnce();
+  expect(steer).toHaveBeenCalledWith(message);
+  expect(
+    installQueueAgentObservation({
+      agent: { ...agent, prompt: undefined },
+    } as unknown as AgentSession),
+  ).toBe(false);
+});
+
+it('observes real streaming queue entries by native identity for duplicate text', async () => {
+  const f = await fixture(undefined, false, false, true);
+  const turn = f.session.prompt('Start the tool.');
+  await vi.waitFor(() => expect(f.toolStarted).toHaveBeenCalledOnce());
+  const entered = [vi.fn(), vi.fn()];
+  const outcomes: unknown[] = [];
+  for (const onEntered of entered) {
+    const result = withQueueSendObservation(
+      () => f.pi.sendUserMessage('same queued text', { deliverAs: 'steer' }),
+      (outcome) => outcomes.push(outcome),
+      onEntered,
+    );
+    expect(result).toMatchObject({ observed: true, result: undefined });
+  }
+  await vi.waitFor(() => expect(outcomes).toHaveLength(2));
+  expect(outcomes).toEqual([{ status: 'accepted' }, { status: 'accepted' }]);
+  f.releaseTool();
+  await turn;
+  await f.session.waitForIdle();
+  await vi.waitFor(() => {
+    expect(entered[0]).toHaveBeenCalledOnce();
+    expect(entered[1]).toHaveBeenCalledOnce();
+  });
+  const users = f.manager
+    .getBranch()
+    .filter(
+      (entry) =>
+        entry.type === 'message' &&
+        entry.message.role === 'user' &&
+        JSON.stringify(entry.message.content).includes('same queued text'),
+    );
+  expect(users).toHaveLength(2);
+  expect(new Set(users.map((entry) => entry.id)).size).toBe(2);
+  expect(
+    f.contexts
+      .at(-1)
+      ?.messages.filter(
+        (message) =>
+          message.role === 'user' &&
+          JSON.stringify(message.content).includes('same queued text'),
+      ),
+  ).toHaveLength(2);
+  expect(f.errors).toEqual([]);
+});
 
 it('queues identical literal steering inputs during a real SDK tool and processes them at the next boundary', async () => {
   const f = await fixture(undefined, false, false, true);

@@ -204,15 +204,41 @@
   font-size: 11px;
 }
 .composer-mode > button {
-  border: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 4px;
   white-space: nowrap;
   background: transparent;
   color: var(--muted);
-  padding: 4px 8px;
+  padding: 4px;
   cursor: pointer;
 }
+.composer-mode > button[data-tooltip] {
+  position: relative;
+}
+.composer-mode > button[data-tooltip]:hover::after,
+.composer-mode > button[data-tooltip]:focus-visible::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 5;
+  bottom: calc(100% + 5px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 6px;
+  border-radius: 3px;
+  background: var(--bg-alt);
+  color: var(--fg);
+  font-size: 10px;
+  pointer-events: none;
+}
+.composer-mode > button:hover,
+.composer-mode > button:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--cyan) 55%, transparent);
+}
 .composer-mode > button.selected {
-  border-color: var(--pink);
   color: var(--pink);
   background: var(--pink-7);
 }

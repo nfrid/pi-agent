@@ -13,6 +13,7 @@ import {
 } from '@pi-dashboard/extension-contributions';
 import {
   type BridgeCommand,
+  MAX_QUEUE_DRAFTS,
   type RuntimeSnapshot,
   serializeFrame,
 } from '@pi-dashboard/protocol';
@@ -1465,6 +1466,57 @@ describe('dashboard-owned queue drafts', () => {
     expect(store.list()).toEqual([]);
   });
 
+  it('continues admitting sequential handoffs beyond the bounded evidence limit', () => {
+    const store = new QueueDraftStore();
+    store.setSession('many-handoffs');
+    for (let index = 0; index < MAX_QUEUE_DRAFTS * 4; index += 1) {
+      const clientId = `sequential-${index}`;
+      store.add({ clientId, mode: 'followUp', text: `item ${index}` });
+      const [draft] = store.take('followUp');
+      if (!draft) throw new Error(`draft ${clientId} was not admitted`);
+      store.resolveHandoff(draft, 'accepted');
+      store.resolveHandoff(draft, 'entered');
+      expect(store.listHandoffs().length).toBeLessThanOrEqual(MAX_QUEUE_DRAFTS);
+    }
+    expect(store.list()).toEqual([]);
+    expect(store.listHandoffs().length).toBeLessThanOrEqual(MAX_QUEUE_DRAFTS);
+    expect(() =>
+      store.add({
+        clientId: `sequential-${MAX_QUEUE_DRAFTS * 4 - 1}`,
+        mode: 'followUp',
+        text: 'do not resend',
+      }),
+    ).toThrow('already exists');
+  });
+
+  it('keeps accepted but not entered evidence pinned at capacity', () => {
+    const store = new QueueDraftStore();
+    store.setSession('accepted-pending');
+    for (let index = 0; index < MAX_QUEUE_DRAFTS; index += 1) {
+      const clientId = `accepted-${index}`;
+      store.add({ clientId, mode: 'followUp', text: `item ${index}` });
+      const [draft] = store.take('followUp');
+      if (!draft) throw new Error(`draft ${clientId} was not admitted`);
+      store.resolveHandoff(draft, 'accepted');
+    }
+    store.add({
+      clientId: 'still-editable',
+      mode: 'followUp',
+      text: 'wait for handoff capacity',
+    });
+    expect(store.take('followUp')).toEqual([]);
+    expect(store.list()).toEqual([
+      expect.objectContaining({ clientId: 'still-editable' }),
+    ]);
+    expect(store.listHandoffs()).toHaveLength(MAX_QUEUE_DRAFTS);
+    expect(
+      store.listHandoffs().every(({ status }) => status === 'accepted'),
+    ).toBe(true);
+    expect(
+      new Set(store.listHandoffs().map(({ clientId }) => clientId)).size,
+    ).toBe(MAX_QUEUE_DRAFTS);
+  });
+
   it('owns queued image bytes while exposing metadata-only snapshots', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'queue-image-'));
     const file = path.join(root, 'image.png');
@@ -1486,6 +1538,7 @@ describe('dashboard-owned queue drafts', () => {
         clientId: 'draft-image',
         mode: 'steer',
         text: '',
+        revision: 1,
         imageCount: 1,
       },
     ]);
@@ -1496,9 +1549,10 @@ describe('dashboard-owned queue drafts', () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  it('flushes each mode once, restores failed sends, and ignores stale sessions', () => {
+  it('records handoff outcomes, retries known failures, and ignores stale sessions', async () => {
     const sendUserMessage = vi.fn((text: string) => {
       if (text === 'fails') throw new Error('Pi queue rejected message');
+      return Promise.resolve();
     });
     const runtime = createRemoteControlRuntime({} as ExtensionAPI);
     if (!runtime) throw new Error('runtime was not created');
@@ -1538,6 +1592,11 @@ describe('dashboard-owned queue drafts', () => {
       mode: 'steer',
       text: 'fails',
     });
+    runtime.queueDrafts.add({
+      clientId: 'steer-3',
+      mode: 'steer',
+      text: 'later in batch',
+    });
     flushQueueDrafts(
       runtime,
       { sendUserMessage } as unknown as ExtensionAPI,
@@ -1547,23 +1606,40 @@ describe('dashboard-owned queue drafts', () => {
     expect(sendUserMessage).toHaveBeenNthCalledWith(1, 'steer first', {
       deliverAs: 'steer',
     });
+    expect(sendUserMessage).toHaveBeenCalledTimes(1);
+    expect(runtime.queueDrafts.list()).toEqual([
+      expect.objectContaining({ clientId: 'follow-1', text: 'follow later' }),
+      expect.objectContaining({ clientId: 'steer-2', text: 'fails' }),
+      expect.objectContaining({ clientId: 'steer-3', text: 'later in batch' }),
+    ]);
+    expect(runtime.queueDrafts.listHandoffs()).toEqual([
+      expect.objectContaining({ clientId: 'steer-1', status: 'handing-off' }),
+    ]);
+    await vi.waitFor(() => expect(sendUserMessage).toHaveBeenCalledTimes(2));
     expect(sendUserMessage).toHaveBeenNthCalledWith(2, 'fails', {
       deliverAs: 'steer',
     });
-    expect(runtime.queueDrafts.list()).toEqual([
-      { clientId: 'follow-1', mode: 'followUp', text: 'follow later' },
-      { clientId: 'steer-2', mode: 'steer', text: 'fails' },
+    await Promise.resolve();
+    expect(runtime.queueDrafts.listHandoffs()).toEqual([
+      expect.objectContaining({ clientId: 'steer-1', status: 'accepted' }),
+      expect.objectContaining({ clientId: 'steer-2', status: 'failed' }),
     ]);
-    sendUserMessage.mockImplementation(() => undefined);
+    expect(() => runtime.queueDrafts.remove('steer-1')).toThrow(
+      'cannot be cancelled',
+    );
+    sendUserMessage.mockImplementation(() => Promise.resolve());
     flushQueueDrafts(
       runtime,
       { sendUserMessage } as unknown as ExtensionAPI,
       first,
       'steer',
     );
-    expect(runtime.queueDrafts.list()).toEqual([
-      { clientId: 'follow-1', mode: 'followUp', text: 'follow later' },
-    ]);
+    await vi.waitFor(() => expect(sendUserMessage).toHaveBeenCalledTimes(4));
+    await vi.waitFor(() =>
+      expect(runtime.queueDrafts.list()).toEqual([
+        expect.objectContaining({ clientId: 'follow-1', text: 'follow later' }),
+      ]),
+    );
     flushQueueDrafts(
       runtime,
       { sendUserMessage } as unknown as ExtensionAPI,
@@ -1573,6 +1649,7 @@ describe('dashboard-owned queue drafts', () => {
     expect(sendUserMessage).toHaveBeenLastCalledWith('follow later', {
       deliverAs: 'followUp',
     });
+    await Promise.resolve();
     const second = contextFor('session-queue-2');
     runtime.setContext(second);
     expect(runtime.isCurrent(first)).toBe(false);
@@ -1599,7 +1676,7 @@ describe('dashboard-owned queue drafts', () => {
       ),
     ).toBe(false);
     expect(runtime.queueDrafts.list()).toEqual([
-      { clientId: 'new-session', mode: 'steer', text: 'new' },
+      { clientId: 'new-session', mode: 'steer', text: 'new', revision: 1 },
     ]);
     // A late shutdown callback from the replaced context must not clear the
     // active session's bridge state.
@@ -1607,6 +1684,54 @@ describe('dashboard-owned queue drafts', () => {
     expect(runtime.snapshot().session.id).toBe('session-queue-2');
     runtime.clearContext(second);
     expect(runtime.queueDrafts.list()).toEqual([]);
+  });
+
+  it('ignores a synchronous send failure after session replacement with colliding draft identity', () => {
+    const runtime = createRemoteControlRuntime({} as ExtensionAPI);
+    if (!runtime) throw new Error('runtime was not created');
+    const contextFor = (id: string) =>
+      ({
+        cwd: '/tmp',
+        sessionManager: {
+          getSessionId: () => id,
+          getBranch: () => [],
+          getSessionFile: () => undefined,
+          getSessionName: () => undefined,
+          getCwd: () => '/tmp',
+          getLeafId: () => undefined,
+        },
+        getContextUsage: () => undefined,
+        isIdle: () => false,
+      }) as unknown as ExtensionContext;
+    const oldContext = contextFor('old-queue-session');
+    const replacement = contextFor('new-queue-session');
+    runtime.setContext(oldContext);
+    runtime.queueDrafts.add({
+      clientId: 'same-id',
+      mode: 'steer',
+      text: 'old send',
+    });
+    const pi = {
+      sendUserMessage: () => {
+        runtime.setContext(replacement);
+        runtime.queueDrafts.add({
+          clientId: 'same-id',
+          mode: 'steer',
+          text: 'new send',
+        });
+        throw new Error('old send failed');
+      },
+    } as unknown as ExtensionAPI;
+    expect(flushQueueDrafts(runtime, pi, oldContext, 'steer')).toBe(true);
+    expect(runtime.queueDrafts.list()).toEqual([
+      expect.objectContaining({
+        clientId: 'same-id',
+        revision: 1,
+        text: 'new send',
+      }),
+    ]);
+    expect(runtime.queueDrafts.listHandoffs()).toEqual([]);
+    runtime.clearContext(replacement);
   });
 
   const turnEndContext = (
@@ -1678,6 +1803,106 @@ describe('dashboard-owned queue drafts', () => {
       }),
     });
     runtime.clearContext(context);
+  });
+
+  it('retains exact-entry evidence after a queued item enters the branch', () => {
+    const store = new QueueDraftStore();
+    store.setSession('entered-session');
+    store.add({ clientId: 'entered', mode: 'followUp', text: 'later' });
+    const [claimed] = store.take('followUp');
+    if (!claimed) throw new Error('draft was not claimed');
+    store.resolveHandoff(claimed, 'entered');
+    expect(store.list()).toEqual([]);
+    expect(store.listHandoffs()).toEqual([
+      expect.objectContaining({ clientId: 'entered', status: 'entered' }),
+    ]);
+    expect(() => store.remove('entered')).toThrow('cannot be cancelled');
+    expect(() =>
+      store.update({
+        clientId: 'entered',
+        mode: 'followUp',
+        text: 'changed',
+      }),
+    ).toThrow('cannot be edited safely');
+  });
+
+  it('retains an uncertain asynchronous rejection and fails closed on retry', async () => {
+    const runtime = createRemoteControlRuntime({} as ExtensionAPI);
+    if (!runtime) throw new Error('runtime was not created');
+    const context = {
+      cwd: '/tmp',
+      sessionManager: {
+        getSessionId: () => 'session-async-reject',
+        getBranch: () => [],
+        getSessionFile: () => undefined,
+        getSessionName: () => undefined,
+        getCwd: () => '/tmp',
+        getLeafId: () => undefined,
+      },
+      getContextUsage: () => undefined,
+      isIdle: () => false,
+    } as unknown as ExtensionContext;
+    runtime.setContext(context);
+    runtime.queueDrafts.add({
+      clientId: 'uncertain',
+      mode: 'steer',
+      text: 'send',
+    });
+    runtime.queueDrafts.add({
+      clientId: 'after-uncertain',
+      mode: 'steer',
+      text: 'do not send after uncertainty',
+    });
+    flushQueueDrafts(
+      runtime,
+      {
+        sendUserMessage: () => Promise.reject(new Error('late rejection')),
+      } as unknown as ExtensionAPI,
+      context,
+      'steer',
+    );
+    await vi.waitFor(() =>
+      expect(runtime.queueDrafts.listHandoffs()).toEqual([
+        expect.objectContaining({ clientId: 'uncertain', status: 'uncertain' }),
+      ]),
+    );
+    expect(runtime.queueDrafts.list()).toEqual([
+      expect.objectContaining({ clientId: 'uncertain' }),
+      expect.objectContaining({ clientId: 'after-uncertain' }),
+    ]);
+    expect(runtime.queueDrafts.listHandoffs()).toHaveLength(1);
+    expect(() =>
+      runtime.queueDrafts.update({
+        clientId: 'uncertain',
+        mode: 'steer',
+        text: 'retry',
+      }),
+    ).toThrow('cannot be edited safely');
+    runtime.clearContext(context);
+  });
+
+  it('locks edits and removal as soon as a revision is claimed', () => {
+    const store = new QueueDraftStore();
+    store.setSession('revision-session');
+    store.add({ clientId: 'revision', mode: 'steer', text: 'original' });
+    expect(
+      store.update({ clientId: 'revision', mode: 'steer', text: 'edited' }),
+    ).toMatchObject({ revision: 2, text: 'edited' });
+    const [claimed] = store.take('steer');
+    if (!claimed) throw new Error('draft was not claimed');
+    expect(() =>
+      store.update({ clientId: 'revision', mode: 'steer', text: 'raced edit' }),
+    ).toThrow('cannot be edited safely');
+    expect(() => store.remove('revision')).toThrow('cannot be cancelled');
+    store.resolveHandoff(claimed, 'accepted');
+    expect(store.list()).toEqual([]);
+    expect(store.listHandoffs()).toEqual([
+      expect.objectContaining({
+        clientId: 'revision',
+        revision: 2,
+        status: 'accepted',
+      }),
+    ]);
   });
 
   it('refreshes context usage after delivering a steer draft', () => {
@@ -1801,7 +2026,12 @@ describe('dashboard-owned queue drafts', () => {
       ),
     ).resolves.toEqual({
       accepted: true,
-      draft: { clientId: 'client-1', mode: 'followUp', text: 'draft' },
+      draft: {
+        clientId: 'client-1',
+        mode: 'followUp',
+        text: 'draft',
+        revision: 1,
+      },
     });
     await expect(
       dispatchDashboardCommand(

@@ -77,11 +77,10 @@ for (const suffix of ['', ' @desktop']) {
     });
     await page.goto('/sessions/waiting-session');
     const editor = page.getByRole('textbox', { name: 'Message Pi' });
-    const mode = page.getByRole('button', {
-      name: 'Steer current work instead of following up later',
-    });
+    const mode = page.locator('.composer-mode > button');
     await expect(editor).toBeEditable();
-    await expect(mode).toHaveText('Steer');
+    await expect(mode).toHaveAccessibleName('Steer current work');
+    await expect(mode).toHaveAttribute('aria-pressed', 'true');
     await expect(
       page.getByRole('button', { name: 'Abort turn' }),
     ).toBeVisible();
@@ -91,19 +90,24 @@ for (const suffix of ['', ' @desktop']) {
     await expect(
       page.locator('.composer').getByText('Prompt', { exact: true }),
     ).toHaveCount(0);
-    await editor.fill('Continue the same request');
+    await editor.click();
+    await page.keyboard.press('ControlOrMeta+A');
+    await page.keyboard.insertText('Continue the same request');
     await page.getByRole('button', { name: 'Send', exact: true }).click();
     await expect.poll(() => commands[0]?.type).toBe('steer');
-    await expect(editor).toBeEmpty();
+    expect(commands[0]?.text).toBe('Continue the same request');
     await mode.click();
-    await expect(mode).toHaveText('Later');
-    await editor.fill('A new ordinary request');
+    await expect(mode).toHaveAccessibleName('Send later');
+    await expect(mode).toHaveAttribute('aria-pressed', 'false');
+    await editor.click();
+    await page.keyboard.press('ControlOrMeta+A');
+    await page.keyboard.insertText('A new ordinary request');
     await page
       .getByRole('button', { name: 'Queue message', exact: true })
       .click();
     await expect.poll(() => commands[1]?.type).toBe('queue.add');
     expect(commands[1]?.mode).toBe('followUp');
-    await expect(editor).toBeEmpty();
+    expect(commands[1]?.text).toBe('A new ordinary request');
     await page.getByRole('button', { name: 'Abort turn' }).click();
     await expect.poll(() => commands[2]?.type).toBe('abort');
     assertNoUnexpectedDashboardApiRequests(page);

@@ -342,6 +342,22 @@ The native input integration uses SDK 1.0.0's prompt entry and queue contract, s
 SDK upgrades must rerun its native regressions. Accepted queued user input remains
 in memory, like the native queue, and does not survive a runtime restart.
 
+Dashboard queue snapshots keep editable `queueDrafts` separate from bounded
+`queueHandoffs`. A handoff carries the same `clientId`, `revision`, mode, and
+safe text metadata. `handing-off` means the runtime called Pi for that revision;
+`accepted` means the underlying SDK send promise fulfilled; `entered` means the
+runtime matched the exact native user-message object to a persisted branch entry.
+`failed` means the call threw synchronously and the draft remains editable;
+`uncertain` means the SDK promise rejected after the call and the runtime retained
+the draft without allowing retry, edit, or cancellation. A claimed revision is
+immutable, including while its status is `handing-off`. Drafts can be edited
+before the runtime claims them. Queue sends are admitted one at a time; a known
+failure or uncertain outcome stops the batch and leaves later drafts editable.
+Handoff records are runtime-memory state, scoped to one session, capped at the
+queue limit, and are not durable. The runtime evicts terminal evidence before
+pending or uncertain evidence. An accepted item without a matching branch entry
+remains `accepted`, not `entered`; promise fulfillment is not context evidence.
+
 ## Dashboard UI principle
 
 Prefer content over labels and chrome: expanded technical payloads should be

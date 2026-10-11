@@ -1,28 +1,8 @@
-/* Queue presentation is owned by QueuePanel. queue-* names remain on elements
-   because queue mode is a runtime semantic vocabulary and a session-wide contract. */
+/* Keep queue rows visually attached to the composer without a boxed panel. */
 .panel {
   order: 0;
-  margin: 0 0 5px;
-  border: var(--border-soft);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--bg-alt) 65%, transparent);
-  overflow: hidden;
-}
-
-.heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 9px;
-  border-bottom: 1px solid var(--line-soft);
-  color: var(--muted);
-  font-size: 10px;
-
-  :global(.eyebrow) {
-    margin: 0;
-    color: var(--orange);
-  }
+  margin: 0 0 4px;
+  min-width: 0;
 }
 
 .list {
@@ -34,26 +14,26 @@
 }
 
 .item {
+  min-inline-size: 0;
+  margin: 0;
+  border: 0;
+  padding: 4px 2px;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: 18px minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   min-width: 0;
-  padding: 7px 9px;
-  border-bottom: 1px solid var(--line-soft);
 }
 
-.item:last-child {
-  border-bottom: 0;
+.mode,
+.status {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
 }
 
-.mode {
-  padding: 2px 5px;
-  border: 1px solid var(--line);
+.mode:global(.queue-steer) {
   color: var(--cyan);
-  font-size: 9px;
-  text-transform: uppercase;
-  white-space: nowrap;
 }
 
 .text {
@@ -67,8 +47,13 @@
 
 .text small {
   display: block;
-  color: var(--cyan);
+  color: var(--muted);
   font-size: 9px;
+}
+
+.text .detail {
+  color: var(--red);
+  white-space: normal;
 }
 
 .item input {
@@ -77,42 +62,74 @@
   border: 1px solid var(--purple);
   background: var(--bg);
   color: var(--fg);
-  padding: 4px 6px;
+  padding: 5px 6px;
 }
 
 .actions {
   display: flex;
-  gap: 5px;
+  gap: 2px;
   flex: none;
 }
 
 .actions button {
-  border: 1px solid var(--line);
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 30px;
+  min-height: 30px;
+  border: 0;
+  border-radius: 4px;
   background: transparent;
   color: var(--muted);
-  padding: 3px 6px;
+  padding: 5px;
   cursor: pointer;
-  font-size: 10px;
 }
 
-.actions button:hover {
-  border-color: var(--cyan);
+.actions button:hover,
+.actions button:focus-visible {
   color: var(--cyan);
+  outline: 1px solid color-mix(in srgb, var(--cyan) 55%, transparent);
 }
 
 .actions button:global(.queue-remove):hover {
-  border-color: var(--red);
   color: var(--red);
 }
 
+.actions button[data-tooltip]:hover::after,
+.actions button[data-tooltip]:focus-visible::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 5;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 6px;
+  border-radius: 3px;
+  background: var(--bg-alt);
+  color: var(--fg);
+  font-size: 10px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .actions button:disabled {
-  cursor: wait;
-  opacity: 0.45;
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.status {
+  min-width: 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.statusError {
+  color: var(--red);
 }
 
 .error {
-  margin: 0;
-  padding: 5px 9px;
+  margin: 2px 0 0;
+  padding: 2px;
   font-size: 10px;
 }
 
@@ -122,11 +139,9 @@
   }
 
   .item {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .actions {
-    grid-column: 2;
+    grid-template-columns: 18px minmax(0, 1fr) auto auto;
+    gap: 5px;
+    padding: 2px 0;
   }
 
   .text {

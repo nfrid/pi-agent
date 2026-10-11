@@ -580,12 +580,33 @@ export const QueueDraftSchema = Type.Object(
     clientId: IdentifierSchema,
     mode: QueueDraftModeSchema,
     text: Type.String({ maxLength: MAX_QUEUE_DRAFT_TEXT }),
+    revision: Type.Optional(Type.Integer({ minimum: 1 })),
     /** Browser-safe metadata; queued image bytes remain runtime-private. */
     imageCount: Type.Optional(Type.Integer({ minimum: 1, maximum: 4 })),
   },
   { additionalProperties: false },
 );
 export type QueueDraft = Static<typeof QueueDraftSchema>;
+
+export const QueueHandoffSchema = Type.Object(
+  {
+    clientId: IdentifierSchema,
+    mode: QueueDraftModeSchema,
+    text: Type.String({ maxLength: MAX_QUEUE_DRAFT_TEXT }),
+    imageCount: Type.Optional(Type.Integer({ minimum: 1, maximum: 4 })),
+    revision: Type.Integer({ minimum: 1 }),
+    status: Type.Union([
+      Type.Literal('handing-off'),
+      Type.Literal('accepted'),
+      Type.Literal('entered'),
+      Type.Literal('failed'),
+      Type.Literal('uncertain'),
+    ]),
+    detail: Type.Optional(Type.String({ maxLength: 2000 })),
+  },
+  { additionalProperties: false },
+);
+export type QueueHandoff = Static<typeof QueueHandoffSchema>;
 
 type RuntimeModel = {
   provider: string;
@@ -670,6 +691,12 @@ const RuntimeSnapshotProperties = {
   queueDrafts: Type.Optional(
     Type.Readonly(Type.Array(QueueDraftSchema, { maxItems: MAX_QUEUE_DRAFTS })),
   ),
+  /** Runtime-owned admission/terminal evidence for handed-off queue items. */
+  queueHandoffs: Type.Optional(
+    Type.Readonly(
+      Type.Array(QueueHandoffSchema, { maxItems: MAX_QUEUE_DRAFTS }),
+    ),
+  ),
   lastError: Type.Optional(Type.String({ minLength: 1, maxLength: 10_000 })),
   online: Type.Optional(Type.Boolean()),
   lastSeenAt: Type.Optional(FiniteNumberSchema),
@@ -691,10 +718,15 @@ export const RuntimeSnapshotSchema = Type.Object(RuntimeSnapshotProperties, {
 type RuntimeSnapshotStatic = Static<typeof RuntimeSnapshotSchema>;
 export type RuntimeSnapshot = Omit<
   RuntimeSnapshotStatic,
-  'session' | 'queueDrafts' | 'extensionSurfaces' | 'composerCommands'
+  | 'session'
+  | 'queueDrafts'
+  | 'queueHandoffs'
+  | 'extensionSurfaces'
+  | 'composerCommands'
 > & {
   session: SessionSnapshot;
   readonly queueDrafts?: readonly QueueDraft[];
+  readonly queueHandoffs?: readonly QueueHandoff[];
   readonly extensionSurfaces?: readonly RuntimeExtensionSurface[];
   readonly composerCommands?: readonly ComposerCommandEntry[];
 };
@@ -707,10 +739,15 @@ export const RuntimeSnapshotPatchSchema = Type.Partial(RuntimeSnapshotSchema, {
 type RuntimeSnapshotPatchStatic = Static<typeof RuntimeSnapshotPatchSchema>;
 export type RuntimeSnapshotPatch = Omit<
   RuntimeSnapshotPatchStatic,
-  'session' | 'queueDrafts' | 'extensionSurfaces' | 'composerCommands'
+  | 'session'
+  | 'queueDrafts'
+  | 'queueHandoffs'
+  | 'extensionSurfaces'
+  | 'composerCommands'
 > & {
   session?: SessionSnapshot;
   queueDrafts?: readonly QueueDraft[];
+  queueHandoffs?: readonly QueueHandoff[];
   extensionSurfaces?: readonly RuntimeExtensionSurface[];
   composerCommands?: readonly ComposerCommandEntry[];
 };

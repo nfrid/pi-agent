@@ -10,6 +10,7 @@ import {
   type QueueDraftMode,
   type QueueDraftRemoveCommand,
   type QueueDraftUpdateCommand,
+  type QueueHandoff,
 } from '@pi-dashboard/protocol/pi-runtime-protocol';
 
 export function queueDraftError(
@@ -52,8 +53,12 @@ export type QueueDraftImage = {
 };
 
 export type StoredQueueDraft = QueueDraft & {
+  readonly revision: number;
   readonly images: readonly QueueDraftImage[];
 };
+type QueueHandoffRecord = QueueHandoff;
+const handoffKey = (clientId: string, revision: number) =>
+  `${clientId}:${revision}`;
 
 function ownImages(
   images: readonly BridgeImageAttachment[] | undefined,
@@ -90,11 +95,13 @@ function publicDraft(draft: StoredQueueDraft): QueueDraft {
 export class QueueDraftStore {
   private sessionId: string | undefined;
   private readonly drafts = new Map<string, StoredQueueDraft>();
+  private readonly handoffs = new Map<string, QueueHandoffRecord>();
 
   setSession(sessionId: string | undefined): void {
     if (this.sessionId === sessionId) return;
     this.sessionId = sessionId;
     this.drafts.clear();
+    this.handoffs.clear();
   }
 
   getSessionId(): string | undefined {
@@ -102,7 +109,18 @@ export class QueueDraftStore {
   }
 
   list(): readonly QueueDraft[] {
-    return [...this.drafts.values()].map(publicDraft);
+    return [...this.drafts.values()]
+      .filter((draft) => {
+        const status = this.handoffs.get(
+          handoffKey(draft.clientId, draft.revision),
+        )?.status;
+        return (
+          status !== 'handing-off' &&
+          status !== 'accepted' &&
+          status !== 'entered'
+        );
+      })
+      .map(publicDraft);
   }
 
   add(
@@ -112,10 +130,15 @@ export class QueueDraftStore {
   ): QueueDraft {
     this.requireSession();
     const clientId = validQueueDraftClientId(draft.clientId);
-    if (this.drafts.has(clientId))
+    if (
+      this.drafts.has(clientId) ||
+      [...this.handoffs.values()].some(
+        (handoff) => handoff.clientId === clientId,
+      )
+    )
       throw queueDraftError(
         'duplicate-queue-draft-client-id',
-        'Queue draft client id already exists.',
+        'Queue draft client id already exists or was already handed off.',
       );
     if (this.drafts.size >= MAX_QUEUE_DRAFTS)
       throw queueDraftError(
@@ -127,6 +150,7 @@ export class QueueDraftStore {
       clientId,
       mode: draft.mode,
       text: validQueueDraftText(draft.text, images.length > 0),
+      revision: 1,
       images,
     } satisfies StoredQueueDraft;
     if (this.totalTextLength() + next.text.length > MAX_QUEUE_DRAFT_TOTAL_TEXT)
@@ -142,15 +166,40 @@ export class QueueDraftStore {
     this.requireSession();
     const clientId = validQueueDraftClientId(draft.clientId);
     const current = this.drafts.get(clientId);
-    if (!current)
+    if (!current) {
+      const handedOff = [...this.handoffs.values()].some(
+        (handoff) =>
+          handoff.clientId === clientId &&
+          ['handing-off', 'accepted', 'entered', 'uncertain'].includes(
+            handoff.status,
+          ),
+      );
+      if (handedOff)
+        throw queueDraftError(
+          'queue-handoff-outcome-unknown',
+          'An accepted or uncertain queue item cannot be edited safely.',
+        );
       throw queueDraftError(
         'unknown-queue-draft-client-id',
         'Queue draft client id is unknown.',
+      );
+    }
+    const handoff = this.handoffs.get(handoffKey(clientId, current.revision));
+    if (
+      handoff?.status === 'handing-off' ||
+      handoff?.status === 'accepted' ||
+      handoff?.status === 'entered' ||
+      handoff?.status === 'uncertain'
+    )
+      throw queueDraftError(
+        'queue-handoff-outcome-unknown',
+        'An accepted or uncertain queue item cannot be edited safely.',
       );
     const next = {
       clientId,
       mode: draft.mode,
       text: validQueueDraftText(draft.text, current.images.length > 0),
+      revision: current.revision + 1,
       images: current.images,
     } satisfies StoredQueueDraft;
     if (
@@ -169,43 +218,121 @@ export class QueueDraftStore {
     this.requireSession();
     validQueueDraftClientId(clientId);
     const draft = this.drafts.get(clientId);
-    if (!draft)
+    if (!draft) {
+      const handedOff = [...this.handoffs.values()].some(
+        (handoff) =>
+          handoff.clientId === clientId &&
+          ['handing-off', 'accepted', 'entered', 'uncertain'].includes(
+            handoff.status,
+          ),
+      );
+      if (handedOff)
+        throw queueDraftError(
+          'queue-handoff-in-progress',
+          'A handed-off queue item cannot be cancelled until its outcome is known.',
+        );
       throw queueDraftError(
         'unknown-queue-draft-client-id',
         'Queue draft client id is unknown.',
       );
+    }
+    if (
+      ['handing-off', 'accepted', 'entered', 'uncertain'].includes(
+        this.handoffs.get(handoffKey(clientId, draft.revision))?.status ?? '',
+      )
+    )
+      throw queueDraftError(
+        'queue-handoff-in-progress',
+        'A handed-off queue item cannot be cancelled until its outcome is known.',
+      );
     this.drafts.delete(clientId);
+    this.handoffs.delete(handoffKey(clientId, draft.revision));
     return publicDraft(draft);
   }
 
-  /** Atomically claim drafts for one Pi delivery boundary. */
+  /** Claim current revisions without removing editable state during async admission. */
   take(mode: QueueDraftMode): StoredQueueDraft[] {
     this.requireSession();
     const claimed: StoredQueueDraft[] = [];
     for (const [clientId, draft] of this.drafts) {
-      if (draft.mode !== mode) continue;
-      claimed.push({ ...draft, images: [...draft.images] });
-      this.drafts.delete(clientId);
+      const key = handoffKey(clientId, draft.revision);
+      const previous = this.handoffs.get(key);
+      if (
+        draft.mode !== mode ||
+        (previous && previous.status !== 'failed') ||
+        !this.makeHandoffCapacity()
+      )
+        continue;
+      const copy = { ...draft, images: [...draft.images] };
+      claimed.push(copy);
+      this.handoffs.set(key, {
+        clientId,
+        mode: draft.mode,
+        text: draft.text,
+        ...(draft.imageCount ? { imageCount: draft.imageCount } : {}),
+        revision: draft.revision,
+        status: 'handing-off',
+      });
+      break;
     }
     return claimed;
   }
 
-  /** Restore a failed delivery without replacing newer edits. */
-  restore(drafts: readonly StoredQueueDraft[]): void {
-    if (!this.sessionId) return;
-    for (const draft of drafts)
-      if (
-        !this.drafts.has(draft.clientId) &&
-        this.totalTextLength() + draft.text.length <= MAX_QUEUE_DRAFT_TOTAL_TEXT
-      )
-        this.drafts.set(draft.clientId, {
-          ...draft,
-          images: [...draft.images],
-        });
+  listHandoffs(): readonly QueueHandoff[] {
+    return [...this.handoffs.values()];
+  }
+
+  resolveHandoff(
+    draft: StoredQueueDraft,
+    status: 'accepted' | 'entered' | 'failed' | 'uncertain',
+    detail?: string,
+  ): void {
+    const key = handoffKey(draft.clientId, draft.revision);
+    const current = this.handoffs.get(key);
+    if (!current) return;
+    if (
+      (status === 'accepted' || status === 'entered') &&
+      this.drafts.get(draft.clientId)?.revision === draft.revision
+    )
+      this.drafts.delete(draft.clientId);
+    if (current.status === 'entered') return;
+    this.handoffs.set(key, {
+      ...current,
+      status,
+      ...(detail ? { detail: detail.slice(0, 2000) } : {}),
+    });
+    this.trimHandoffs();
+  }
+
+  releaseHandoff(draft: StoredQueueDraft): void {
+    this.handoffs.delete(handoffKey(draft.clientId, draft.revision));
   }
 
   clear(): void {
     this.drafts.clear();
+    this.handoffs.clear();
+  }
+
+  private trimHandoffs(): void {
+    while (this.handoffs.size > MAX_QUEUE_DRAFTS) {
+      const evictable = [...this.handoffs].find(
+        ([, handoff]) =>
+          handoff.status === 'entered' || handoff.status === 'failed',
+      );
+      if (!evictable) return;
+      this.handoffs.delete(evictable[0]);
+    }
+  }
+
+  private makeHandoffCapacity(): boolean {
+    if (this.handoffs.size < MAX_QUEUE_DRAFTS) return true;
+    const evictable = [...this.handoffs].find(
+      ([, handoff]) =>
+        handoff.status === 'entered' || handoff.status === 'failed',
+    );
+    if (!evictable) return false;
+    this.handoffs.delete(evictable[0]);
+    return true;
   }
 
   private totalTextLength(): number {

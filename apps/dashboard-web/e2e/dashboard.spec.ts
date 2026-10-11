@@ -7137,11 +7137,9 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await mocks.emit({
     type: 'snapshot',
   });
-  const deliveryMode = page.getByRole('button', {
-    name: 'Steer current work instead of following up later',
-  });
+  const deliveryMode = page.locator('.composer-mode > button');
   await expect(deliveryMode).toHaveCount(1);
-  await expect(deliveryMode).toHaveText('Steer');
+  await expect(deliveryMode).toHaveAccessibleName('Steer current work');
   await expect(deliveryMode).toHaveAttribute('aria-pressed', 'true');
   const workingComposerInput = page.getByLabel('Message Pi');
   const abortTurn = page.getByRole('button', { name: 'Abort turn' });
@@ -7150,16 +7148,21 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await expect
     .poll(() => mocks.commands.some((command) => command.type === 'abort'))
     .toBe(true);
-  await workingComposerInput.fill('/compact');
+  await workingComposerInput.click();
+  await workingComposerInput.press('ControlOrMeta+A');
+  await workingComposerInput.pressSequentially('/compact');
   await expect(
     page.getByRole('listbox', { name: 'Autocomplete suggestions' }),
   ).toHaveCount(0);
-  await workingComposerInput.fill('');
+  await workingComposerInput.press('ControlOrMeta+A');
+  await workingComposerInput.press('Backspace');
   await deliveryMode.click();
-  await expect(deliveryMode).toHaveText('Later');
+  await expect(deliveryMode).toHaveAccessibleName('Send later');
   await expect(deliveryMode).toHaveAttribute('aria-pressed', 'false');
   const commandCountBeforeFollowUp = mocks.commands.length;
-  await workingComposerInput.fill('Follow up while delegates run');
+  await workingComposerInput.click();
+  await workingComposerInput.press('ControlOrMeta+A');
+  await workingComposerInput.pressSequentially('Follow up while delegates run');
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   await expect
     .poll(() => mocks.commands.slice(commandCountBeforeFollowUp).at(-1))
