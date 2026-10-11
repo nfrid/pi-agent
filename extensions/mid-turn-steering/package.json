@@ -1,0 +1,10 @@
+{
+  "name": "@pi-agent/mid-turn-steering",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "./index.ts",
+  "dependencies": {
+    "openai": "7.19.0"
+  }
+}
