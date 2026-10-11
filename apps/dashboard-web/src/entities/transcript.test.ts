@@ -65,6 +65,63 @@ describe('tool row views and virtual transcript construction', () => {
       endedAt: 90,
     });
   });
+  it('keeps server-steered answer fragments inside work without rewriting their phase', () => {
+    const textSignature = JSON.stringify({
+      v: 1,
+      id: 'partial-text',
+      phase: 'final_answer',
+    });
+    const partial = {
+      type: 'message',
+      id: 'partial',
+      message: {
+        role: 'assistant',
+        stopReason: 'stop',
+        rawStopReason: 'incomplete.steered',
+        content: [{ type: 'text', text: 'Interrupted answer', textSignature }],
+      },
+    };
+    const source = [
+      {
+        type: 'message',
+        id: 'request',
+        message: { role: 'user', content: 'Request' },
+      },
+      partial,
+      {
+        type: 'message',
+        id: 'final',
+        message: { role: 'assistant', content: 'Confirmed final answer' },
+      },
+      {
+        type: 'custom',
+        id: 'closure',
+        customType: 'response-closure',
+        data: {
+          requestMessageId: 'request',
+          finalMessageId: 'final',
+          startedAt: 10,
+          endedAt: 90,
+        },
+      },
+    ];
+    const projection = hydrateTranscript(source, 'steered-session');
+    expect(projection.items.partial).toMatchObject({ stopReason: 'steered' });
+    const items = toTranscriptEntries(projection);
+    expect(items.find((item) => item.key === 'partial')).toMatchObject({
+      text: 'Interrupted answer',
+      textPhase: { hasAnswer: false },
+    });
+    const visibleKeys = (open = new Set<string>()) =>
+      buildVirtualTranscriptRows(items, open).flatMap((row) =>
+        row.kind === 'entry' ? [items[row.index]?.key] : [],
+      );
+    expect(visibleKeys()).toEqual(['request', 'final']);
+    expect(visibleKeys(new Set(['work-log-final']))).toContain('partial');
+    expect(partial.message.content[0]?.textSignature).toBe(textSignature);
+    expect(partial.message.stopReason).toBe('stop');
+  });
+
   it('keeps marked answer blocks outside collapsed work while restoring original content when opened', () => {
     const phase = (id: string, value: 'commentary' | 'final_answer') =>
       JSON.stringify({ v: 1, id, phase: value });

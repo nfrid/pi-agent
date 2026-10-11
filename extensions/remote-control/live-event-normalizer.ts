@@ -333,10 +333,16 @@ export class LiveEventNormalizer {
         : `${this.runtimeEpoch}:${++this.identitySequence}`;
     }
 
-    const stopReason =
+    const nativeStopReason =
       directString(message, 'stopReason') ??
       directString(event, 'stopReason') ??
       directString(assistantEvent, 'stopReason');
+    const rawStopReason =
+      directString(message, 'rawStopReason') ??
+      directString(event, 'rawStopReason') ??
+      directString(assistantEvent, 'rawStopReason');
+    const stopReason =
+      rawStopReason === 'incomplete.steered' ? 'steered' : nativeStopReason;
     const rawErrorMessage =
       directString(message, 'errorMessage') ??
       directString(event, 'errorMessage') ??

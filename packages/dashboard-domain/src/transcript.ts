@@ -179,6 +179,14 @@ function directString(
   return typeof value[key] === 'string' && value[key] ? value[key] : undefined;
 }
 
+function nativeMessageStopReason(
+  message: Record<string, unknown>,
+): string | undefined {
+  return message.rawStopReason === 'incomplete.steered'
+    ? 'steered'
+    : directString(message, 'stopReason');
+}
+
 function boundedErrorMessage(value: unknown): string | undefined {
   return typeof value === 'string'
     ? value.slice(0, MAX_ASSISTANT_ERROR_MESSAGE)
@@ -359,9 +367,9 @@ function normalizedMessage(
     ...(directString(message, 'turnId') === undefined
       ? {}
       : { turnId: directString(message, 'turnId') }),
-    ...(directString(message, 'stopReason') === undefined
+    ...(nativeMessageStopReason(message) === undefined
       ? {}
-      : { stopReason: directString(message, 'stopReason') }),
+      : { stopReason: nativeMessageStopReason(message) }),
     ...(boundedErrorMessage(message.errorMessage) === undefined
       ? {}
       : { errorMessage: boundedErrorMessage(message.errorMessage) }),
@@ -1254,9 +1262,9 @@ export function hydrateTranscript(
         content,
         ...(timestamp === undefined ? {} : { timestamp }),
         ...(turnId === undefined ? {} : { turnId }),
-        ...(directString(message, 'stopReason') === undefined
+        ...(nativeMessageStopReason(message) === undefined
           ? {}
-          : { stopReason: directString(message, 'stopReason') }),
+          : { stopReason: nativeMessageStopReason(message) }),
         ...(boundedErrorMessage(message.errorMessage) === undefined
           ? {}
           : { errorMessage: boundedErrorMessage(message.errorMessage) }),

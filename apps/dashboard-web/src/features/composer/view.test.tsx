@@ -62,6 +62,7 @@ vi.mock('./attachments', async (importOriginal) => {
 });
 vi.mock('./queue', () => ({
   newQueueId: () => 'queue-1',
+  QueueModeIcon: () => null,
   QueuePanel: () => null,
   queueCommand: vi.fn(),
   shouldShowQueuePanel: () => false,

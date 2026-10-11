@@ -7,6 +7,26 @@ import {
 import { LiveEventNormalizer } from './live-event-normalizer';
 
 describe('live message identity', () => {
+  it('retains a server-steered partial as a non-final domain outcome', () => {
+    const normalizer = new LiveEventNormalizer('runtime-steered');
+    const message = {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'Interrupted answer' }],
+      stopReason: 'stop',
+      rawStopReason: 'incomplete.steered',
+    };
+    expect(normalizer.normalizeMessage('finished', { message })).toMatchObject({
+      stopReason: 'steered',
+      content: message.content,
+    });
+    expect(message.stopReason).toBe('stop');
+    expect(
+      normalizer.normalizeMessage('finished', {
+        message: { ...message, rawStopReason: 'incomplete.max_output_tokens' },
+      }),
+    ).toMatchObject({ stopReason: 'stop' });
+  });
+
   it('retains the user prompt after a system lifecycle with the same timestamp', () => {
     const normalizer = new LiveEventNormalizer('runtime-resume');
     let projection = createTranscriptProjection('session-resume');
