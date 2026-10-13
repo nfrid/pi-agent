@@ -64,9 +64,15 @@ Completed 2026-10-02:
 - Capture is capped at 8 MiB per hosted job and delegate artifact; unavailable capture/publication is explicit. Cancellation and timeout retain precedence. No event-size limit was raised.
 - No live deployment, parent package rebuild, or process-host restart was performed. Hosted exact capture needs the new process-host build; older hosts remain diagnosable but cannot recover bytes they already discarded.
 
+Activated 2026-10-13:
+
+- Built and validated exact commit `299e20a142c2` with `bun run workspace:build`, `bun run check` and two focused Diagnostics/delegate Playwright tests. Deployed its workspace bundles and restarted the process host only after verifying zero active jobs.
+- Process-host PID `34365` replaced `57725`; runtime-host PID `46366` remained unchanged. The new host answered its capabilities request. A consistent telemetry backup and previous bundles were retained before deployment.
+- No live overflow recovery was performed. Regression checks do not establish the post-activation evaluation result. Already-open Pi sessions still need extension reload or replacement before their callbacks can participate in this evaluation.
+
 ## Evaluation
 
-- **Window:** Pending live activation. After the approved change is activated, observe the first 10 delegate overflow or near-limit fixtures/live events, including at least 3 real overflow recoveries, or 2026-10-31, whichever is later. Pre-activation regression fixtures do not fill this window.
+- **Window:** Process-host activated on 2026-10-13. Using reloaded or new Pi sessions, observe the first 10 delegate overflow or near-limit fixtures/live events, including at least 3 real overflow recoveries, or 2026-10-31, whichever is later. Pre-activation regression fixtures do not fill this window.
 - **Result:** pending (`keep` | `revise` | `revert` | `insufficient evidence`)
 
 Compare with the baseline of two attempts and zero recoverable findings. Keep only if every overflow has a truthful bounded reason, no retained payload leaks inline or across owners, and at least 3 real overflow cases can be inspected without repeating the delegated investigation.
@@ -75,4 +81,4 @@ Compare with the baseline of two attempts and zero recoverable findings. Keep on
 
 - **Approved implementation:** Option 1, explicitly approved by the user on 2026-10-02. Preserve oversized delegate event bytes outside model context and expose bounded recovery metadata.
 - **Merged change:** `fdb5e7cbcb9c` — `fix(delegate): preserve oversized event recovery artifacts`.
-- **Resolution:** Source implementation and parent validation complete; live activation and post-activation evaluation remain pending. Process-host upgrade requires a separately arranged quiet window because restart terminates hosted jobs.
+- **Resolution:** Source implementation, parent validation and live process-host activation complete; post-activation evaluation remains pending. Existing Pi sessions require extension reload or replacement to use the updated callbacks. No successful live overflow recovery is claimed.
