@@ -72,8 +72,12 @@ for (const suffix of ['', ' @desktop']) {
   }) => {
     await installDashboardBootstrap(page, snapshot);
     await page.goto('/');
+    if (!suffix)
+      await page.getByRole('button', { name: 'Open agent list' }).click();
 
-    const sidebar = page.locator('aside');
+    const sidebar = page.getByRole('complementary', {
+      name: 'Agents and threads',
+    });
     await expect(sidebar.getByText('Ordinary parent session')).toBeVisible();
     await expect(sidebar.getByText('External user session')).toBeVisible();
     await expect(
