@@ -961,15 +961,32 @@ export class DashboardApplication {
         .map((runtime) => [runtime.session.id, runtime]),
     );
     const persistedAssociations = this.orchestration.sessionRunAssociations();
-    return this.sessions
-      .list()
-      .map((session) =>
+    const sessions = this.sessions.list();
+    const metadata = new Map(
+      sessions.map((session) => [
+        session.id,
         this.sessionMetadataEntry(
           session,
           activeRuntimes.get(session.id),
           persistedAssociations.get(session.id) ?? null,
         ),
+      ]),
+    );
+    for (const runtime of liveRuntimes) {
+      if (metadata.has(runtime.session.id)) continue;
+      const session = this.unindexedDelegateSession(runtime);
+      if (!session) continue;
+      const activeRuntime = activeRuntimes.get(session.id);
+      metadata.set(
+        session.id,
+        this.sessionMetadataEntry(
+          session,
+          activeRuntime,
+          persistedAssociations.get(session.id) ?? null,
+        ),
       );
+    }
+    return [...metadata.values()];
   }
 
   private sessionMetadataEntry(
@@ -997,6 +1014,20 @@ export class DashboardApplication {
         : {}),
       ...(runtimeTitle === undefined ? {} : { title: runtimeTitle }),
       activeRuntimeId: runtime?.runtimeId,
+    };
+  }
+
+  private unindexedDelegateSession(
+    runtime: RuntimeSnapshot,
+  ): SessionIndexEntry | undefined {
+    const file = runtime.session.file;
+    if (!file || !this.sessionIndex.isAuxiliaryFilePath(file)) return undefined;
+    return {
+      id: runtime.session.id,
+      file: '',
+      cwd: runtime.session.cwd ?? runtime.cwd,
+      sessionKind: 'delegate',
+      updatedAt: runtime.lastSeenAt ?? 0,
     };
   }
 
@@ -1046,11 +1077,21 @@ export class DashboardApplication {
     if (!prior) return undefined;
     this.refreshAssociationCatalogue();
     const indexed = this.sessionIndex.getListed(sessionId);
-    const runtime = this.registry
+    const runtimeCandidates = this.registry
       .snapshots()
-      .find((item) => item.session.id === sessionId && item.online !== false);
-    const current = indexed
-      ? this.sessionMetadataEntry(indexed, runtime)
+      .filter((item) => item.session.id === sessionId);
+    const runtimeSnapshot =
+      runtimeCandidates.find((item) => item.online !== false) ??
+      runtimeCandidates[0];
+    const runtime =
+      runtimeSnapshot?.online === false ? undefined : runtimeSnapshot;
+    const session =
+      indexed ??
+      (runtimeSnapshot
+        ? this.unindexedDelegateSession(runtimeSnapshot)
+        : undefined);
+    const current = session
+      ? this.sessionMetadataEntry(session, runtime)
       : undefined;
     const previous = prior.get(sessionId);
     if (current) prior.set(sessionId, current);

@@ -263,7 +263,14 @@ describe('agent thread view model', () => {
 
   it('keeps nested delegate sessions out of top-level thread navigation', () => {
     const snapshot = {
-      runtimes: [],
+      runtimes: [
+        {
+          runtimeId: 'child-runtime',
+          cwd: '/work/app',
+          liveState: 'working',
+          session: { id: 'child', entries: [] },
+        },
+      ],
       sessions: [
         { id: 'parent', cwd: '/work/app', updatedAt: 1 },
         {

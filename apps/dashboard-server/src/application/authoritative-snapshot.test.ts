@@ -51,13 +51,18 @@ async function fixture(
   ],
   projectAssociation?: { projectId: string | null; checkoutId: string | null },
   onProjectResolve?: () => void,
+  withDelegateSessionDir = false,
 ): Promise<Fixture> {
   const root = await mkdtemp(
     path.join(os.tmpdir(), 'dashboard-authoritative-'),
   );
   const sessionDir = path.join(root, 'sessions');
+  const delegateSessionDir = withDelegateSessionDir
+    ? path.join(root, '.delegate-sessions')
+    : undefined;
   const file = path.join(sessionDir, `${sessionId}.jsonl`);
   await mkdir(sessionDir, { recursive: true });
+  if (delegateSessionDir) await mkdir(delegateSessionDir, { recursive: true });
   await writeFile(
     file,
     `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
@@ -65,7 +70,12 @@ async function fixture(
   const metadata = new MetadataStore(
     path.join(root, 'state', 'dashboard.sqlite'),
   );
-  const sessions = new SessionIndex(sessionDir, metadata);
+  const sessions = new SessionIndex(
+    sessionDir,
+    metadata,
+    undefined,
+    delegateSessionDir,
+  );
   let current: RuntimeSnapshot[] = [];
   const provenance = new Map<
     string,
@@ -197,6 +207,261 @@ function activeTranscriptState(
 }
 
 describe('authoritative application snapshot lifecycle', () => {
+  it('classifies an auxiliary runtime while its session file is not indexed', async () => {
+    const value = await fixture(
+      'offline-fallback-fixture',
+      [
+        {
+          type: 'session',
+          id: 'offline-fallback-fixture',
+          cwd: '/tmp/snapshot',
+        },
+      ],
+      undefined,
+      undefined,
+      true,
+    );
+    const file = path.join(
+      value.root,
+      '.delegate-sessions',
+      'unindexed-delegate.jsonl',
+    );
+    await writeFile(
+      file,
+      `${JSON.stringify({
+        type: 'session',
+        id: 'unindexed-delegate',
+        cwd: '/tmp/snapshot',
+        sessionKind: 'delegate',
+        parentSessionId: 'parent-session',
+      })}\n`,
+    );
+    vi.spyOn(value.sessions, 'list').mockReturnValue([]);
+    vi.spyOn(value.sessions, 'getListed').mockReturnValue(undefined);
+    value.setRuntimes([
+      runtime(file, {
+        online: false,
+        session: { id: 'unindexed-delegate', file, entries: [] },
+      }),
+    ]);
+    expect(
+      value.app.sessionMetadataDeltaForSession('unindexed-delegate'),
+    ).toMatchObject({
+      upsert: [
+        expect.objectContaining({
+          id: 'unindexed-delegate',
+          sessionKind: 'delegate',
+        }),
+      ],
+      remove: [],
+    });
+
+    const metadata = value.app.sessionMetadata();
+    expect(metadata).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'unindexed-delegate',
+          file: '',
+          sessionKind: 'delegate',
+        }),
+      ]),
+    );
+    expect(
+      metadata.find((session) => session.id === 'unindexed-delegate')
+        ?.activeRuntimeId,
+    ).toBeUndefined();
+    expect(value.app.shellProjection().sessions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'unindexed-delegate',
+          sessionKind: 'delegate',
+        }),
+      ]),
+    );
+    const ordinaryRuntime = runtime(value.file, {
+      session: {
+        id: 'ordinary-external-session',
+        file: value.file,
+        entries: [],
+      },
+    });
+    expect(value.app.sessionMetadata([ordinaryRuntime])).toEqual([]);
+  });
+
+  it('publishes an initial metadata delta for an unindexed online delegate', async () => {
+    const value = await fixture(
+      'online-delta-fixture',
+      [{ type: 'session', id: 'online-delta-fixture', cwd: '/tmp' }],
+      undefined,
+      undefined,
+      true,
+    );
+    const file = path.join(
+      value.root,
+      '.delegate-sessions',
+      'online-unindexed-delegate.jsonl',
+    );
+    vi.spyOn(value.sessions, 'getListed').mockReturnValue(undefined);
+    value.setRuntimes([
+      runtime(file, {
+        runtimeId: 'online-delegate-runtime',
+        online: true,
+        session: { id: 'online-unindexed-delegate', file, entries: [] },
+      }),
+    ]);
+
+    expect(
+      value.app.sessionMetadataDeltaForSession('online-unindexed-delegate'),
+    ).toMatchObject({
+      upsert: [
+        expect.objectContaining({
+          id: 'online-unindexed-delegate',
+          sessionKind: 'delegate',
+          activeRuntimeId: 'online-delegate-runtime',
+          updatedAt: 0,
+        }),
+      ],
+      remove: [],
+    });
+    expect(
+      value.app.sessionMetadataDeltaForSession('online-unindexed-delegate'),
+    ).toBeUndefined();
+  });
+
+  it('prefers an online runtime over offline duplicates for delegate metadata', async () => {
+    const value = await fixture(
+      'duplicate-runtime-fixture',
+      [{ type: 'session', id: 'duplicate-runtime-fixture', cwd: '/tmp' }],
+      undefined,
+      undefined,
+      true,
+    );
+    const file = path.join(
+      value.root,
+      '.delegate-sessions',
+      'duplicate-delegate.jsonl',
+    );
+    vi.spyOn(value.sessions, 'getListed').mockReturnValue(undefined);
+    value.setRuntimes([
+      runtime(file, {
+        runtimeId: 'offline-delegate-runtime',
+        online: false,
+        session: { id: 'duplicate-delegate', file, entries: [] },
+      }),
+      runtime(file, {
+        runtimeId: 'online-delegate-runtime',
+        online: true,
+        session: { id: 'duplicate-delegate', file, entries: [] },
+      }),
+    ]);
+
+    expect(value.app.sessionMetadata()).toContainEqual(
+      expect.objectContaining({
+        id: 'duplicate-delegate',
+        sessionKind: 'delegate',
+        activeRuntimeId: 'online-delegate-runtime',
+      }),
+    );
+    expect(
+      value.app.sessionMetadataDeltaForSession('duplicate-delegate'),
+    ).toMatchObject({
+      upsert: [
+        expect.objectContaining({
+          id: 'duplicate-delegate',
+          sessionKind: 'delegate',
+          activeRuntimeId: 'online-delegate-runtime',
+        }),
+      ],
+    });
+  });
+
+  it('replaces fallback delegate metadata after indexing without losing classification', async () => {
+    const value = await fixture(
+      'index-transition-fixture',
+      [{ type: 'session', id: 'index-transition-fixture', cwd: '/tmp' }],
+      undefined,
+      undefined,
+      true,
+    );
+    const file = path.join(
+      value.root,
+      '.delegate-sessions',
+      'indexed-later-delegate.jsonl',
+    );
+    await writeFile(
+      file,
+      `${JSON.stringify({
+        type: 'session',
+        id: 'indexed-later-delegate',
+        cwd: '/tmp',
+        sessionKind: 'delegate',
+        parentSessionId: 'parent-session',
+      })}\n`,
+    );
+    vi.spyOn(value.sessions, 'getListed').mockReturnValueOnce(undefined);
+    value.setRuntimes([
+      runtime(file, {
+        runtimeId: 'indexed-later-runtime',
+        online: true,
+        session: { id: 'indexed-later-delegate', file, entries: [] },
+      }),
+    ]);
+
+    expect(
+      value.app.sessionMetadataDeltaForSession('indexed-later-delegate'),
+    ).toMatchObject({
+      upsert: [
+        expect.objectContaining({
+          id: 'indexed-later-delegate',
+          sessionKind: 'delegate',
+          activeRuntimeId: 'indexed-later-runtime',
+        }),
+      ],
+    });
+
+    await value.sessions.refresh();
+    expect(
+      value.app.sessionMetadataDeltaForSession('indexed-later-delegate'),
+    ).toMatchObject({
+      upsert: [
+        expect.objectContaining({
+          id: 'indexed-later-delegate',
+          sessionKind: 'delegate',
+          parentSessionId: 'parent-session',
+          activeRuntimeId: 'indexed-later-runtime',
+        }),
+      ],
+    });
+  });
+
+  it('joins delegate header metadata to an active runtime session', async () => {
+    const value = await fixture('delegate-session', [
+      {
+        type: 'session',
+        id: 'delegate-session',
+        cwd: '/tmp/snapshot',
+        sessionKind: 'delegate',
+        parentSessionId: 'parent-session',
+      },
+    ]);
+    value.register(
+      runtime(value.file, {
+        session: { id: 'delegate-session', entries: [] },
+      }),
+    );
+
+    expect(value.app.sessionMetadata()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'delegate-session',
+          sessionKind: 'delegate',
+          parentSessionId: 'parent-session',
+          activeRuntimeId: 'snapshot-runtime',
+        }),
+      ]),
+    );
+  });
+
   it('resolves same-project recent defaults across offline and active branches', async () => {
     const value = await fixture('resolver-session');
     value.metadata.orchestration.createProject({

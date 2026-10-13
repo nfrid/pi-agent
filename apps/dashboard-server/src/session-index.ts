@@ -815,6 +815,11 @@ export class SessionIndex {
     return entry ? this.isAuxiliaryFile(entry.file) : false;
   }
 
+  /** Check a runtime-reported file path even before its session is indexed. */
+  isAuxiliaryFilePath(file: string): boolean {
+    return this.isAuxiliaryFile(file);
+  }
+
   private async currentIndexedFile(id: string): Promise<IndexedFile> {
     let indexed = this.files.get(id);
     if (!indexed || !(await this.isSafeSessionFile(indexed.file)))
@@ -2085,10 +2090,9 @@ export class SessionIndex {
           return 'committed';
         catalogue.fileIds.delete(previous.file);
       }
-      const auxiliaryDelegate =
-        this.isAuxiliaryFile(resolved) && header.sessionKind === 'delegate';
+      const delegateSession = header.sessionKind === 'delegate';
       const headerParentSessionId =
-        auxiliaryDelegate &&
+        delegateSession &&
         typeof header.parentSessionId === 'string' &&
         header.parentSessionId.trim().length > 0 &&
         header.parentSessionId.length <= 256 &&
@@ -2099,7 +2103,7 @@ export class SessionIndex {
           ? header.parentSessionId.trim()
           : undefined;
       const headerDelegateName =
-        auxiliaryDelegate &&
+        delegateSession &&
         typeof header.name === 'string' &&
         header.name.trim().length > 0 &&
         header.name.length <= 512 &&
@@ -2117,7 +2121,7 @@ export class SessionIndex {
         id,
         file: resolved,
         cwd: header.cwd,
-        ...(auxiliaryDelegate ? { sessionKind: 'delegate' as const } : {}),
+        ...(delegateSession ? { sessionKind: 'delegate' as const } : {}),
         ...(headerParentSessionId
           ? { parentSessionId: headerParentSessionId }
           : {}),
@@ -2149,10 +2153,11 @@ export class SessionIndex {
       catalogue.files.set(id, entry);
       catalogue.fileIds.set(resolved, id);
       if (catalogue.kind === 'staged') {
-        if (!this.isAuxiliaryFile(resolved))
+        if (!this.isAuxiliaryFile(resolved) && !delegateSession)
           catalogue.pendingMetadata.set(id, entry);
       } else {
-        if (!this.isAuxiliaryFile(resolved)) this.metadata?.saveSession(entry);
+        if (!this.isAuxiliaryFile(resolved) && !delegateSession)
+          this.metadata?.saveSession(entry);
         catalogue.fileRevisions.set(resolved, (fileRevision ?? 0) + 1);
         this.liveMutationGeneration += 1;
       }

@@ -438,9 +438,65 @@ describe('session index', () => {
         }),
       ]),
     );
-    expect(index.get('child')).toMatchObject({ id: 'child', file: '' });
-    expect(index.getListed('child')).toMatchObject({ id: 'child', file: '' });
+    expect(index.get('child')).toMatchObject({
+      id: 'child',
+      file: '',
+      sessionKind: 'delegate',
+      parentSessionId: 'parent',
+      name: 'Nested review',
+    });
+    expect(index.getListed('child')).toMatchObject({
+      id: 'child',
+      sessionKind: 'delegate',
+      parentSessionId: 'parent',
+    });
     expect(index.isAuxiliary('child')).toBe(true);
+  });
+
+  it('classifies explicit delegate headers in the main session directory and lists user sessions', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-main-delegate-'),
+    );
+    await writeFile(
+      path.join(root, 'delegate.jsonl'),
+      `${JSON.stringify({
+        type: 'session',
+        id: 'delegate-in-main-root',
+        cwd: '/tmp/project',
+        sessionKind: 'delegate',
+        parentSessionId: 'parent',
+      })}\n`,
+    );
+    await writeFile(
+      path.join(root, 'user.jsonl'),
+      `${JSON.stringify({
+        type: 'session',
+        id: 'user-session',
+        cwd: '/tmp/project',
+      })}\n`,
+    );
+    const saveSession = vi.fn();
+    const index = new SessionIndex(root, { saveSession } as never);
+    await index.rebuild();
+
+    expect(index.list()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'delegate-in-main-root',
+          sessionKind: 'delegate',
+          parentSessionId: 'parent',
+        }),
+        expect.objectContaining({ id: 'user-session' }),
+      ]),
+    );
+    expect(index.getListed('delegate-in-main-root')).toMatchObject({
+      sessionKind: 'delegate',
+      parentSessionId: 'parent',
+    });
+    expect(saveSession).toHaveBeenCalledTimes(1);
+    expect(saveSession).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'user-session' }),
+    );
   });
 
   it('does not expose unlinked auxiliary sessions', async () => {
@@ -1549,6 +1605,36 @@ describe('session index', () => {
     await expect(index.readEntries('escaped-id')).rejects.toThrow(
       'Unknown session.',
     );
+  });
+
+  it('matches only paths inside the configured auxiliary directory', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-boundary-'),
+    );
+    const sessions = path.join(root, 'sessions');
+    const delegates = path.join(root, '.delegate-sessions');
+    await mkdir(sessions);
+    await mkdir(delegates);
+    const index = new SessionIndex(sessions, undefined, undefined, delegates);
+
+    expect(index.isAuxiliaryFilePath(path.join(delegates, 'child.jsonl'))).toBe(
+      true,
+    );
+    expect(
+      index.isAuxiliaryFilePath(
+        path.join(root, '.delegate-sessions-sibling', 'child.jsonl'),
+      ),
+    ).toBe(false);
+    expect(
+      index.isAuxiliaryFilePath(
+        path.join(delegates, '..', 'sessions', 'user.jsonl'),
+      ),
+    ).toBe(false);
+    expect(
+      index.isAuxiliaryFilePath(
+        path.join(delegates, '..', 'outside', 'child.jsonl'),
+      ),
+    ).toBe(false);
   });
 
   it('only treats auxiliary JSONL watcher events as catalogue inputs', async () => {
