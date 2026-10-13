@@ -175,18 +175,24 @@ describe('dashboard telemetry', () => {
       expect(response.status).toBe(200);
     }
     const db = new DatabaseSync(join(dir, 'telemetry', 'events.sqlite'));
-    const rows = db
-      .prepare('SELECT operation, code, outcome, occurrence_count FROM events')
-      .all();
-    db.close();
-    expect(rows).toEqual([
-      {
-        operation: 'http..api.settings',
-        code: 'http-200',
-        outcome: 'success',
-        occurrence_count: 3,
-      },
-    ]);
+    const rows = db.prepare(
+      'SELECT operation, code, outcome, occurrence_count FROM events',
+    );
+    try {
+      // The response can reach the client before its onResponse hook records it.
+      await expect
+        .poll(() => rows.all())
+        .toEqual([
+          {
+            operation: 'http..api.settings',
+            code: 'http-200',
+            outcome: 'success',
+            occurrence_count: 3,
+          },
+        ]);
+    } finally {
+      db.close();
+    }
   });
   it('requires authentication and a permitted origin for reads and reports on an isolated daemon', async () => {
     const { dir } = fixture();
