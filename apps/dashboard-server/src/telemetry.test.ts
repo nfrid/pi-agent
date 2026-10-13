@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDashboardServer } from './http.js';
 import { DashboardTelemetry, parseBrowserTelemetryInput } from './telemetry.js';
@@ -34,6 +35,9 @@ describe('dashboard telemetry', () => {
     const invalid = [
       { code: 'render-error', version: 'v', message: 'PRIVATE' },
       { code: 'render-error', version: 'v', note: 'PRIVATE' },
+      { code: 'uncaught-error', version: 'v', errorName: 'PrivateError' },
+      { code: 'uncaught-error', version: 'v', errorName: 'PRIVATE MESSAGE' },
+      { code: 'connection-error', version: 'v', errorName: 'TypeError' },
       { code: 'anything', version: 'v' },
       { code: 'manual-report', version: 'v', note: ' ' },
       { code: 'manual-report', version: 'v', note: 'a'.repeat(1_001) },
@@ -43,6 +47,20 @@ describe('dashboard telemetry', () => {
       expect(() => parseBrowserTelemetryInput(input)).toThrow(
         'Invalid telemetry report.',
       );
+    expect(
+      parseBrowserTelemetryInput({
+        code: 'uncaught-error',
+        version: 'v',
+        errorName: 'TypeError',
+      }),
+    ).toMatchObject({ errorName: 'TypeError' });
+    expect(
+      parseBrowserTelemetryInput({
+        code: 'resize-observer-loop',
+        version: 'v',
+        errorName: 'Error',
+      }),
+    ).toMatchObject({ errorName: 'Error' });
   });
   it('bounds authenticated browser reports and resets the limit after a minute', () => {
     let now = 1_000;
@@ -135,6 +153,41 @@ describe('dashboard telemetry', () => {
     });
     expect(telemetry.overview().eventCount).toBe(before + 1);
   });
+  it('aggregates real authenticated settings GET requests using the emitted operation name', async () => {
+    const { dir } = fixture();
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'telemetry-test-token',
+      origins: ['http://dashboard.test'],
+      stateDir: join(dir, 'state'),
+      sessionDir: join(dir, 'sessions'),
+      telemetryDir: join(dir, 'telemetry'),
+    });
+    await server.start();
+    const url = `http://127.0.0.1:${server.port}/api/settings`;
+    for (let index = 0; index < 3; index++) {
+      const response = await fetch(url, {
+        headers: {
+          origin: 'http://dashboard.test',
+          'x-dashboard-token': 'telemetry-test-token',
+        },
+      });
+      expect(response.status).toBe(200);
+    }
+    const db = new DatabaseSync(join(dir, 'telemetry', 'events.sqlite'));
+    const rows = db
+      .prepare('SELECT operation, code, outcome, occurrence_count FROM events')
+      .all();
+    db.close();
+    expect(rows).toEqual([
+      {
+        operation: 'http..api.settings',
+        code: 'http-200',
+        outcome: 'success',
+        occurrence_count: 3,
+      },
+    ]);
+  });
   it('requires authentication and a permitted origin for reads and reports on an isolated daemon', async () => {
     const { dir } = fixture();
     server = await createDashboardServer({
@@ -186,6 +239,33 @@ describe('dashboard telemetry', () => {
     );
     expect(staleSubscription.status).toBe(200);
     expect(await staleSubscription.text()).toContain('protocol-mismatch');
+    const browserReport = await fetch(
+      `http://127.0.0.1:${server.port}/trpc/telemetryReport`,
+      {
+        method: 'POST',
+        headers: authorized,
+        body: JSON.stringify({
+          code: 'resize-observer-loop',
+          version: 'browser-build',
+          errorName: 'Error',
+        }),
+      },
+    );
+    expect(browserReport.status).toBe(200);
+    const unsafeReport = await fetch(
+      `http://127.0.0.1:${server.port}/trpc/telemetryReport`,
+      {
+        method: 'POST',
+        headers: authorized,
+        body: JSON.stringify({
+          code: 'resize-observer-loop',
+          version: 'browser-build',
+          errorName: 'Error',
+          message: 'PRIVATE RAW MESSAGE',
+        }),
+      },
+    );
+    expect(unsafeReport.status).not.toBe(200);
     const read = await fetch(
       `http://127.0.0.1:${server.port}/trpc/telemetryOverview`,
       { method: 'POST', headers: authorized, body: 'null' },
@@ -197,7 +277,7 @@ describe('dashboard telemetry', () => {
           issues: {
             code: string;
             outcome: string;
-            samples: { note?: string }[];
+            samples: { note?: string; errorName?: string }[];
           }[];
         };
       };
@@ -212,6 +292,11 @@ describe('dashboard telemetry', () => {
         outcome: 'expected',
       }),
     );
+    expect(
+      issues.find((issue) => issue.code === 'resize-observer-loop')?.samples[0]
+        ?.errorName,
+    ).toBe('Error');
     expect(JSON.stringify(data)).not.toContain('secret123');
+    expect(JSON.stringify(data)).not.toContain('PRIVATE RAW MESSAGE');
   });
 });

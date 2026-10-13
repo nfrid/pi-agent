@@ -476,14 +476,20 @@ export async function runDelegate(
         'event-overflow',
         buildLifecycleDiagnostic('event-overflow', run.errorMessage),
       );
+    } else if (!spawnError && retryable && hostError) {
+      run.stopReason = 'error';
+      run.errorMessage ||= `Retryable process-host error: ${hostError}.`;
+      setDelegateLifecycleText(
+        run,
+        'host-transport-error',
+        buildLifecycleDiagnostic('host-transport-error', hostError),
+      );
     } else if (!spawnError && exitCode !== 0) {
       // A child error event may have populated errorMessage before close. The
       // observed nonzero exit is still the stable lifecycle cause; that text
       // is evidence only, bounded inside the diagnostic.
       run.stopReason = 'error';
-      run.errorMessage ||= retryable
-        ? `Retryable process-host error: ${hostError ?? `child exited with code ${exitCode}`}.`
-        : `Child Pi exited with code ${exitCode}.`;
+      run.errorMessage ||= `Child Pi exited with code ${exitCode}.`;
       setDelegateLifecycleText(
         run,
         'child-nonzero-exit',

@@ -236,6 +236,25 @@ describe('BoundedFeed', () => {
     expect(feed.metrics().subscribers).toBe(0);
   });
 
+  it('completes cleanly when aborted while waiting after caught-up', async () => {
+    const feed = new BoundedFeed<Snapshot, Event>(
+      'shell',
+      bounds,
+      'generation',
+    );
+    const controller = new AbortController();
+    const iterator = feed.subscribe({
+      signal: controller.signal,
+      buildSnapshot: async () => ({ value: 0 }),
+    });
+    await next(iterator);
+    await next(iterator);
+    const pending = iterator.next();
+    controller.abort();
+    await expect(pending).resolves.toMatchObject({ done: true });
+    expect(feed.metrics().subscribers).toBe(0);
+  });
+
   it('keeps deferred keyed records ordered and cleans aborted subscribers', async () => {
     const feed = new BoundedFeed<Snapshot, Event>(
       'shell',

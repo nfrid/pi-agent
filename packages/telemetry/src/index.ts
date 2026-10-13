@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import {
+  isSafeTelemetryErrorName,
   redactTelemetryNote,
   TELEMETRY_MAX_EVENTS,
   TELEMETRY_RETENTION_DAYS,
@@ -19,18 +20,6 @@ export * from './contracts.js';
 const tokenPattern = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,95}$/;
 const sources = new Set(['harness', 'dashboard-server', 'dashboard-browser']);
 const outcomes = new Set(['success', 'failure', 'expected', 'quirk']);
-const errorNames = new Set([
-  'Error',
-  'TypeError',
-  'RangeError',
-  'SyntaxError',
-  'ReferenceError',
-  'URIError',
-  'AggregateError',
-  'AbortError',
-  'TimeoutError',
-]);
-
 let revision: string | undefined;
 export function telemetryVersion(runtimeVersion: string): string {
   const override = process.env.PI_TELEMETRY_VERSION;
@@ -48,15 +37,6 @@ export function telemetryVersion(runtimeVersion: string): string {
     }
   }
   return `pi-${runtimeVersion}.${revision}`;
-}
-
-export function safeTelemetryErrorName(error: unknown): string {
-  try {
-    const name = error instanceof Error ? error.name : '';
-    return errorNames.has(name) ? name : 'Error';
-  } catch {
-    return 'Error';
-  }
 }
 
 /** PI_TELEMETRY_DIR can isolate tests or move the local store. No remote sink. */
@@ -100,7 +80,7 @@ function normalize(event: TelemetryEvent): TelemetryEvent | undefined {
     ...(optionalId(event.attemptId)
       ? { attemptId: optionalId(event.attemptId) }
       : {}),
-    ...(event.errorName && errorNames.has(event.errorName)
+    ...(isSafeTelemetryErrorName(event.errorName)
       ? { errorName: event.errorName }
       : {}),
     ...(note ? { note } : {}),
@@ -112,6 +92,9 @@ const emptyOverview = (): TelemetryOverview => ({
   retentionDays: TELEMETRY_RETENTION_DAYS,
   maxEvents: TELEMETRY_MAX_EVENTS,
   eventCount: 0,
+  observationCount: 0,
+  firstTimestamp: null,
+  lastTimestamp: null,
   issues: [],
 });
 
@@ -144,6 +127,24 @@ export class TelemetryStore {
         );
         CREATE INDEX IF NOT EXISTS events_timestamp ON events(timestamp);
       `);
+      const columns = new Set(
+        (
+          db.prepare('PRAGMA table_info(events)').all() as { name: string }[]
+        ).map((column) => column.name),
+      );
+      if (!columns.has('occurrence_count'))
+        db.exec(
+          'ALTER TABLE events ADD COLUMN occurrence_count INTEGER NOT NULL DEFAULT 1',
+        );
+      if (!columns.has('aggregate_bucket'))
+        db.exec('ALTER TABLE events ADD COLUMN aggregate_bucket INTEGER');
+      if (!columns.has('last_timestamp')) {
+        db.exec('ALTER TABLE events ADD COLUMN last_timestamp INTEGER');
+        db.exec('UPDATE events SET last_timestamp = timestamp');
+      }
+      db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS events_aggregate_bucket
+        ON events(source, operation, code, payload, aggregate_bucket)
+        WHERE aggregate_bucket IS NOT NULL`);
       this.db = db;
       return db;
     } catch (error) {
@@ -168,6 +169,44 @@ export class TelemetryStore {
       if (!value) return false;
       db = this.database();
       db.exec('BEGIN IMMEDIATE');
+      const aggregate =
+        value.source === 'dashboard-server' &&
+        value.outcome === 'success' &&
+        value.code === 'http-200' &&
+        (value.operation === 'http..api.settings' ||
+          value.operation === 'http..api.sessions..id.delegate.history');
+      const now = this.now();
+      const aggregateValue = aggregate
+        ? {
+            source: value.source,
+            operation: value.operation,
+            code: value.code,
+            outcome: value.outcome,
+            version: value.version,
+          }
+        : undefined;
+      const bucket = aggregate
+        ? Math.floor(now / 3_600_000) * 3_600_000
+        : undefined;
+      if (aggregate) {
+        this.prune(db);
+        const existing = db
+          .prepare(`SELECT id FROM events WHERE source = ? AND operation = ?
+            AND code = ? AND payload = ? AND aggregate_bucket = ?`)
+          .get(
+            value.source,
+            value.operation,
+            value.code,
+            JSON.stringify(aggregateValue),
+            bucket ?? null,
+          ) as { id: number } | undefined;
+        if (existing) {
+          db.prepare(`UPDATE events SET occurrence_count = occurrence_count + 1,
+            last_timestamp = ? WHERE id = ?`).run(now, existing.id);
+          db.exec('COMMIT');
+          return true;
+        }
+      }
       this.prune(db, 1);
       const relatedEventIds =
         value.outcome === 'quirk'
@@ -180,17 +219,20 @@ export class TelemetryStore {
               .all(value.sessionId ?? null, value.sessionId ?? null)
               .map((row) => Number(row.id))
           : undefined;
-      db.prepare(`INSERT INTO events(timestamp, source, operation, code, outcome, payload)
-        VALUES (?, ?, ?, ?, ?, ?)`).run(
-        this.now(),
+      db.prepare(`INSERT INTO events(timestamp, source, operation, code, outcome, payload,
+        occurrence_count, aggregate_bucket, last_timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`).run(
+        now,
         value.source,
         value.operation,
         value.code,
         value.outcome,
         JSON.stringify({
-          ...value,
+          ...(aggregateValue ?? value),
           ...(relatedEventIds ? { relatedEventIds } : {}),
         }),
+        bucket ?? null,
+        now,
       );
       db.exec('COMMIT');
       return true;
@@ -209,11 +251,16 @@ export class TelemetryStore {
       const db = this.database();
       this.prune(db);
       const rows = db
-        .prepare('SELECT id, timestamp, payload FROM events ORDER BY id DESC')
+        .prepare(
+          `SELECT id, timestamp, COALESCE(last_timestamp, timestamp) AS last_timestamp,
+            payload, occurrence_count FROM events ORDER BY id DESC`,
+        )
         .all() as unknown as {
         id: number;
         timestamp: number;
+        last_timestamp: number;
         payload: string;
+        occurrence_count: number;
       }[];
       const parsed = rows.map((row) => ({
         ...row,
@@ -232,8 +279,9 @@ export class TelemetryStore {
             attempts: 0,
             failures: 0,
           };
-          total.attempts++;
-          if (event.outcome === 'failure') total.failures++;
+          total.attempts += row.occurrence_count;
+          if (event.outcome === 'failure')
+            total.failures += row.occurrence_count;
           totals.set(operationKey, total);
         }
         if (event.outcome === 'success') continue;
@@ -259,7 +307,7 @@ export class TelemetryStore {
           };
           groups.set(key, group);
         }
-        group.count++;
+        group.count += row.occurrence_count;
         group.firstSeen = Math.min(group.firstSeen, row.timestamp);
         group.lastSeen = Math.max(group.lastSeen, row.timestamp);
         if (group.samples.length < 5)
@@ -304,6 +352,18 @@ export class TelemetryStore {
         retentionDays: TELEMETRY_RETENTION_DAYS,
         maxEvents: TELEMETRY_MAX_EVENTS,
         eventCount: rows.length,
+        observationCount: rows.reduce(
+          (count, row) => count + row.occurrence_count,
+          0,
+        ),
+        firstTimestamp:
+          rows.length > 0
+            ? Math.min(...rows.map((row) => row.timestamp))
+            : null,
+        lastTimestamp:
+          rows.length > 0
+            ? Math.max(...rows.map((row) => row.last_timestamp))
+            : null,
         issues: issues.slice(0, 100),
       };
     } catch {

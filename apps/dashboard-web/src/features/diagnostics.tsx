@@ -61,9 +61,22 @@ export function DiagnosticsPage() {
       </p>
       {overview.data && (
         <p>
-          Retains up to {overview.data.maxEvents.toLocaleString()} events for{' '}
-          {overview.data.retentionDays} days.{' '}
-          {overview.data.eventCount.toLocaleString()} events currently retained.
+          Retains up to {overview.data.maxEvents.toLocaleString()} stored
+          records for up to {overview.data.retentionDays} days.{' '}
+          {overview.data.eventCount.toLocaleString()} stored records represent{' '}
+          {overview.data.observationCount.toLocaleString()} occurrences.{' '}
+          {overview.data.available &&
+          overview.data.firstTimestamp !== null &&
+          overview.data.lastTimestamp !== null ? (
+            <>
+              Retained window: {time(overview.data.firstTimestamp)} to{' '}
+              {time(overview.data.lastTimestamp)}.
+            </>
+          ) : overview.data.available ? (
+            'No retained records are available.'
+          ) : (
+            'Retained window unavailable.'
+          )}{' '}
           Shows the 100 most recently active issue groups.
         </p>
       )}

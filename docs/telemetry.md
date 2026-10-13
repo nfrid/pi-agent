@@ -17,8 +17,12 @@ is at these explicit boundaries, not every exception caught by Pi or a project.
 
 The dashboard records authenticated finite HTTP/RPC outcomes, subscription
 failures, browser errors, rendering failures and connection transitions. Browser
-reports use fixed codes. Browser requests require the existing token, origin and
-protocol checks. The daemon accepts at most 120 browser reports per minute.
+reports use fixed codes and an allowlisted error class where available. Raw error
+messages, stacks, URLs and error objects never enter browser telemetry. Exactly
+the standard ResizeObserver loop messages map to `resize-observer-loop`; other
+browser errors remain `uncaught-error`. Browser requests require the existing
+token, origin and protocol checks. The daemon accepts at most 120 browser reports
+per minute.
 During an outage the browser retains up to 20 observations in memory and retries
 on another observation or an online/connection event. Closing the tab loses that
 queue. Collection never reports its own transport failures.
@@ -45,10 +49,22 @@ The default store is `<Pi agent directory>/telemetry/events.sqlite`, respecting
 `PI_CODING_AGENT_DIR`. Set `PI_TELEMETRY_DIR` to move or isolate it. The directory
 is private to the user and database files use mode 0600. It is not tracked in Git.
 
-The store retains at most 10,000 events for 30 days. Writes and reads prune older
-records. SQLite reuses freed pages; its database page limit is 32 MiB, with a
-bounded temporary rollback journal during a write. Secure deletion clears deleted
-cells. Records expire on the next read or write, not from a separate daemon.
+The store retains at most 10,000 stored records for up to 30 days. Diagnostics
+shows both stored row count and represented observation count. Writes and reads
+prune older records. Diagnostics reports the actual earliest and latest retained
+timestamps, or says none are available when the store is empty. SQLite
+reuses freed pages; its database page limit is 32 MiB, with a bounded temporary
+rollback journal during a write. Secure deletion clears deleted cells. Records
+expire on the next read or write, not from a separate daemon.
+
+Successful `http-200` records for `http..api.settings` and
+`http..api.sessions..id.delegate.history` share hourly buckets by operation,
+version and code. The stored occurrence count contributes fully to operation
+outcome totals. Bucket expiration uses its first observation timestamp, so the
+whole bucket expires together and retention may drop later observations by up to
+one hour. Other successes, all failures, expected outcomes and quirks remain
+individual records. Updating a bucket does not consume a record slot or evict a
+separate record.
 
 CLI recording does not require a dashboard daemon. Writes use short local
 transactions with a 25 ms busy timeout. Unavailable, locked or corrupt storage

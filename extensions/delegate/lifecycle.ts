@@ -51,6 +51,7 @@ const LIFECYCLE_REASONS: readonly DelegateLifecycleReason[] = [
   'queued-cancellation',
   'timeout',
   'child-nonzero-exit',
+  'host-transport-error',
   'event-overflow',
   'provider-runner-error',
   'setup-failure',
@@ -142,6 +143,8 @@ export function buildLifecycleDiagnostic(
         return 'The delegate exceeded its configured runtime limit.';
       case 'child-nonzero-exit':
         return 'The child process exited unsuccessfully.';
+      case 'host-transport-error':
+        return 'The process host transport failed before a child exit was observed.';
       case 'event-overflow':
         return 'The child emitted truncated events that could not be validated.';
       case 'provider-runner-error':

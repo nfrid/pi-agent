@@ -17,6 +17,7 @@ export type DelegateLifecycleReason =
   | 'queued-cancellation'
   | 'timeout'
   | 'child-nonzero-exit'
+  | 'host-transport-error'
   | 'event-overflow'
   | 'provider-runner-error'
   | 'setup-failure'

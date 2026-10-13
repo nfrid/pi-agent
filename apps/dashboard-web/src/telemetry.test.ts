@@ -29,20 +29,41 @@ describe('browser telemetry', () => {
     const error = Object.assign(new Event('error'), {
       message: 'PRIVATE',
       filename: '/private/path',
-      error: new Error('PRIVATE'),
+      error: new TypeError('PRIVATE'),
     });
     window.dispatchEvent(error);
     await vi.waitFor(() => expect(transport.mutate).toHaveBeenCalledOnce());
+    window.dispatchEvent(
+      Object.assign(new Event('error'), {
+        message:
+          'ResizeObserver loop completed with undelivered notifications.',
+        filename: 'https://private.example/path',
+        error: new Error('PRIVATE URL AND STACK'),
+      }),
+    );
+    await vi.waitFor(() => expect(transport.mutate).toHaveBeenCalledTimes(2));
+    window.dispatchEvent(
+      Object.assign(new Event('error'), {
+        message: 'ResizeObserver loop has secret=message',
+        error: Object.assign(new Error('PRIVATE'), { name: 'PrivateClass' }),
+      }),
+    );
+    await vi.waitFor(() => expect(transport.mutate).toHaveBeenCalledTimes(3));
     window.dispatchEvent(
       Object.assign(new Event('unhandledrejection'), {
         reason: 'PRIVATE SECRET',
       }),
     );
-    await vi.waitFor(() => expect(transport.mutate).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(transport.mutate).toHaveBeenCalledTimes(4));
     expect(transport.mutate.mock.calls.map(([input]) => input.code)).toEqual([
+      'uncaught-error',
+      'resize-observer-loop',
       'uncaught-error',
       'unhandled-rejection',
     ]);
+    expect(transport.mutate.mock.calls[0][0].errorName).toBe('TypeError');
+    expect(transport.mutate.mock.calls[1][0].errorName).toBe('Error');
+    expect(transport.mutate.mock.calls[2][0].errorName).toBe('Error');
     expect(JSON.stringify(transport.mutate.mock.calls)).not.toContain(
       'PRIVATE',
     );
@@ -53,7 +74,7 @@ describe('browser telemetry', () => {
     uninstall();
     window.dispatchEvent(error);
     await flushBrowserTelemetry();
-    expect(transport.mutate).toHaveBeenCalledTimes(2);
+    expect(transport.mutate).toHaveBeenCalledTimes(4);
   });
   it('buffers at most 20 offline observations and flushes them on reconnect', async () => {
     const { reportBrowserTelemetry, flushBrowserTelemetry } = await import(

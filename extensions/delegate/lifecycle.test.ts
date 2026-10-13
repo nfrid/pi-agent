@@ -1,5 +1,6 @@
 import { BACKGROUND_JOBS_MAX_EVENT_ARTIFACT_BYTES } from '@pi-agent/background-jobs';
 import { afterEach, describe, expect, test, vi } from 'vitest';
+import * as harnessTelemetry from '../shared/telemetry';
 import * as delegateChild from './delegate-child';
 import { processJsonLine } from './events';
 import {
@@ -608,6 +609,65 @@ describe('delegate lifecycle failure projection', () => {
       reason: 'child-nonzero-exit',
       diagnostic: expect.stringContaining(hostRestartError),
     });
+  });
+
+  test('classifies a retryable host transport failure without exposing raw output', async () => {
+    vi.spyOn(delegateChild, 'runHostedDelegateChild').mockImplementation(
+      async (run) => {
+        run.stderr = 'raw host output '.repeat(10_000);
+        return {
+          exitCode: 1,
+          wasAborted: false,
+          timedOut: false,
+          hostError: 'Background-jobs request timed out.',
+          retryable: true,
+        };
+      },
+    );
+    const telemetry = vi.spyOn(harnessTelemetry, 'recordHarnessTelemetry');
+
+    const run = await runDelegate({
+      cwd: '/tmp',
+      task: 'host restart diagnostic',
+      context: 'fresh',
+      sessionPath: '/tmp/lifecycle-hosted-error.jsonl',
+      isolation: 'shared',
+      warningAfterMs: 5_000,
+      maxConcurrency: 1,
+      hosted: true,
+      ownerSessionId: 'parent-session',
+      mode: 'single',
+    });
+
+    expect(run.retryable).toBe(true);
+    expect(
+      getDelegateLifecycle(run, { includeBoundedFallback: true }),
+    ).toMatchObject({
+      reason: 'host-transport-error',
+      continuationUsable: false,
+      writableBranchRetained: false,
+      readOnlySnapshotRetained: false,
+      diagnostic: expect.stringContaining('Background-jobs request timed out.'),
+    });
+    expect(telemetry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: 'delegate.lifecycle',
+        code: 'host-transport-error',
+        outcome: 'failure',
+      }),
+    );
+    expect(JSON.stringify(telemetry.mock.calls)).not.toContain(
+      'Background-jobs request timed out.',
+    );
+    expect(JSON.stringify(telemetry.mock.calls)).not.toContain(
+      'raw host output',
+    );
+    expect(JSON.stringify(getDelegateLifecycle(run))).toContain(
+      'Background-jobs request timed out.',
+    );
+    expect(JSON.stringify(getDelegateLifecycle(run))).not.toContain(
+      'raw host output',
+    );
   });
 
   test('classifies a nonzero exit even when a child error event populated the message', async () => {

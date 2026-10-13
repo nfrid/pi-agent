@@ -36,6 +36,7 @@ test('diagnostics groups issues and accepts explicit local reports', async ({
         outcome: 'failure',
         version: 'release-1',
         sessionId: 'session-1',
+        errorName: 'TypeError',
       },
     ],
   };
@@ -48,6 +49,9 @@ test('diagnostics groups issues and accepts explicit local reports', async ({
         retentionDays: 30,
         maxEvents: 10_000,
         eventCount: 10,
+        observationCount: 12,
+        firstTimestamp: 1,
+        lastTimestamp: 2,
         issues: [issue, { ...issue, code: 'cancelled', outcome: 'expected' }],
       }),
     }),
@@ -68,6 +72,18 @@ test('diagnostics groups issues and accepts explicit local reports', async ({
   const recorded = page.getByRole('article', {
     name: 'delegate.lifecycle: timeout',
   });
+  const retainedWindow = await page.evaluate(
+    ([first, last]) =>
+      `Retained window: ${new Date(first).toLocaleString()} to ${new Date(last).toLocaleString()}.`,
+    [1, 2],
+  );
+  await expect(page.getByText(retainedWindow, { exact: false })).toBeVisible();
+  await expect(
+    page.getByText(/up to 10,000 stored records for up to 30 days/),
+  ).toBeVisible();
+  await expect(
+    page.getByText('10 stored records represent 12 occurrences.'),
+  ).toBeVisible();
   await expect(recorded).toContainText('3 occurrences');
   await expect(recorded).toContainText('3 failures / 10 recorded outcomes');
   await expect(
@@ -78,6 +94,7 @@ test('diagnostics groups issues and accepts explicit local reports', async ({
     page.getByRole('article', { name: 'delegate.lifecycle: cancelled' }),
   ).toBeVisible();
   await recorded.getByText('Recent samples', { exact: true }).click();
+  await expect(recorded).toContainText('Error class: TypeError');
   await expect(
     recorded.getByRole('link', { name: 'Open local session' }),
   ).toHaveAttribute('href', '/sessions/session-1');
@@ -97,7 +114,8 @@ test('diagnostics groups issues and accepts explicit local reports', async ({
     window.dispatchEvent(
       new ErrorEvent('error', {
         message: 'PRIVATE PROMPT token=secret',
-        error: new Error('PRIVATE OUTPUT'),
+        filename: 'https://private.example/path',
+        error: new TypeError('PRIVATE OUTPUT'),
       }),
     ),
   );
@@ -105,8 +123,24 @@ test('diagnostics groups issues and accepts explicit local reports', async ({
     .poll(() => reports.some((report) => report.code === 'uncaught-error'))
     .toBe(true);
   expect(
+    reports.find((report) => report.code === 'uncaught-error')?.errorName,
+  ).toBe('TypeError');
+  await page.evaluate(() =>
+    window.dispatchEvent(
+      new ErrorEvent('error', {
+        message: 'ResizeObserver loop limit exceeded',
+        error: new Error('PRIVATE LOOP MESSAGE'),
+      }),
+    ),
+  );
+  await expect
+    .poll(() =>
+      reports.some((report) => report.code === 'resize-observer-loop'),
+    )
+    .toBe(true);
+  expect(
     JSON.stringify(reports.filter((report) => report.code !== 'manual-report')),
-  ).not.toContain('PRIVATE');
+  ).not.toMatch(/PRIVATE|private\.example|secret/);
 });
 
 test('terminal history settles stale running delegate summaries and inspectors @desktop', async ({

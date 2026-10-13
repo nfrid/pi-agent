@@ -59,6 +59,7 @@ describe('local telemetry', () => {
     const overview = reopened.overview();
     expect(overview.available).toBe(true);
     expect(overview.eventCount).toBe(4);
+    expect(overview.observationCount).toBe(4);
     const issue = overview.issues.find((item) => item.code === 'timeout');
     expect(issue).toMatchObject({
       count: 2,
@@ -111,6 +112,7 @@ describe('local telemetry', () => {
         ...event,
         note: 'PRIVATE OUTPUT',
         errorName: 'PRIVATE ERROR',
+        message: 'PRIVATE MESSAGE',
         sessionId: '/Users/private/session.jsonl',
         args: 'PRIVATE ARGUMENTS',
         result: 'PRIVATE RESULT',
@@ -190,6 +192,206 @@ describe('local telemetry', () => {
     expect(
       overview.issues.find((issue) => issue.code === 'timeout')?.samples,
     ).toHaveLength(5);
+  });
+
+  it('migrates a persisted legacy schema and counts successful HTTP buckets exactly across reopen', () => {
+    let now = 3_600_000;
+    const directory = mkdtempSync(join(tmpdir(), 'pi-telemetry-legacy-'));
+    directories.push(directory);
+    const db = new DatabaseSync(join(directory, 'events.sqlite'));
+    db.exec(`CREATE TABLE events (
+      id INTEGER PRIMARY KEY, timestamp INTEGER NOT NULL, source TEXT NOT NULL,
+      operation TEXT NOT NULL, code TEXT NOT NULL, outcome TEXT NOT NULL, payload TEXT NOT NULL
+    )`);
+    db.prepare(`INSERT INTO events(timestamp, source, operation, code, outcome, payload)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(
+      1,
+      'harness',
+      'legacy',
+      'failure',
+      'failure',
+      JSON.stringify({ ...event, timestamp: 1 }),
+    );
+    db.close();
+    const store = new TelemetryStore(directory, () => now);
+    stores.push(store);
+    const record = (operation: string, version = 'v1', code = 'http-200') =>
+      store.record({
+        source: 'dashboard-server',
+        operation,
+        code,
+        outcome: 'success',
+        version,
+      });
+    expect(record('http..api.settings')).toBe(true);
+    expect(record('http..api.settings')).toBe(true);
+    expect(record('http..api.settings', 'v2')).toBe(true);
+    expect(record('http..api.settings', 'v1', 'http-201')).toBe(true);
+    expect(record('http..api.sessions..id.delegate.history')).toBe(true);
+    expect(record('http..api.other')).toBe(true);
+    expect(
+      store.record({
+        source: 'dashboard-server',
+        operation: 'http..api.settings',
+        code: 'http-500',
+        outcome: 'failure',
+        version: 'v1',
+      }),
+    ).toBe(true);
+    store.close();
+    const reopened = new TelemetryStore(directory, () => now);
+    stores.push(reopened);
+    expect(reopened.overview().eventCount).toBe(7);
+    expect(reopened.overview().observationCount).toBe(8);
+    const inspect = new DatabaseSync(join(directory, 'events.sqlite'));
+    const aggregates = inspect
+      .prepare(`SELECT operation, payload, occurrence_count
+      FROM events WHERE aggregate_bucket IS NOT NULL`)
+      .all() as {
+      operation: string;
+      payload: string;
+      occurrence_count: number;
+    }[];
+    inspect.close();
+    expect(aggregates).toHaveLength(3);
+    expect(
+      aggregates.find((row) => row.operation === 'http..api.settings')
+        ?.occurrence_count,
+    ).toBe(2);
+    const overview = reopened.overview();
+    expect(
+      overview.issues.find(
+        (issue) =>
+          issue.operation === 'http..api.settings' && issue.code === 'http-500',
+      ),
+    ).toMatchObject({ count: 1, attempts: 5, failures: 1 });
+    now += 3_600_000;
+    expect(
+      reopened.record({
+        source: 'dashboard-server',
+        operation: 'http..api.settings',
+        code: 'http-200',
+        outcome: 'success',
+        version: 'v1',
+      }),
+    ).toBe(true);
+    expect(reopened.overview().eventCount).toBe(8);
+    expect(reopened.overview().observationCount).toBe(9);
+  });
+
+  it('does not evict another row when an HTTP aggregate bucket is updated at capacity', () => {
+    let now = 100;
+    const { store, directory } = fixture(() => now);
+    const aggregate: TelemetryEvent = {
+      source: 'dashboard-server',
+      operation: 'http..api.settings',
+      code: 'http-200',
+      outcome: 'success',
+      version: 'v1',
+    };
+    expect(store.record(aggregate)).toBe(true);
+    const db = new DatabaseSync(join(directory, 'events.sqlite'));
+    const insert = db.prepare(
+      'INSERT INTO events(timestamp,source,operation,code,outcome,payload) VALUES (?,?,?,?,?,?)',
+    );
+    db.exec('BEGIN');
+    for (let index = 0; index < TELEMETRY_MAX_EVENTS - 1; index++)
+      insert.run(
+        now,
+        'harness',
+        `operation${index}`,
+        'timeout',
+        'failure',
+        JSON.stringify({
+          source: 'harness',
+          operation: `operation${index}`,
+          code: 'timeout',
+          outcome: 'failure',
+          version: 'pi-test',
+        }),
+      );
+    db.exec('COMMIT');
+    db.close();
+    now++;
+    expect(store.record(aggregate)).toBe(true);
+    const overview = store.overview();
+    expect(overview.eventCount).toBe(TELEMETRY_MAX_EVENTS);
+    expect(overview.observationCount).toBe(TELEMETRY_MAX_EVENTS + 1);
+    expect(overview.lastTimestamp).toBe(now);
+    const persisted = new DatabaseSync(join(directory, 'events.sqlite'));
+    expect(
+      persisted
+        .prepare(
+          "SELECT COUNT(*) AS count FROM events WHERE operation = 'operation0'",
+        )
+        .get(),
+    ).toEqual({ count: 1 });
+    expect(
+      (
+        persisted
+          .prepare(
+            'SELECT occurrence_count FROM events WHERE aggregate_bucket IS NOT NULL',
+          )
+          .get() as { occurrence_count: number }
+      ).occurrence_count,
+    ).toBe(2);
+    persisted.close();
+  });
+
+  it('uses the event time for legacy-style inserts that omit last_timestamp', () => {
+    const { store, directory } = fixture(() => 100);
+    store.record(event);
+    const db = new DatabaseSync(join(directory, 'events.sqlite'));
+    db.prepare(
+      'INSERT INTO events(timestamp,source,operation,code,outcome,payload) VALUES (?,?,?,?,?,?)',
+    ).run(
+      200,
+      event.source,
+      event.operation,
+      event.code,
+      event.outcome,
+      JSON.stringify(event),
+    );
+    db.close();
+    expect(store.overview()).toMatchObject({
+      eventCount: 2,
+      observationCount: 2,
+      firstTimestamp: 100,
+      lastTimestamp: 200,
+    });
+  });
+
+  it('expires whole hourly aggregates by their first timestamp and reports the retained window', () => {
+    let now = 1;
+    const { store } = fixture(() => now);
+    const aggregate: TelemetryEvent = {
+      source: 'dashboard-server',
+      operation: 'http..api.settings',
+      code: 'http-200',
+      outcome: 'success',
+      version: 'v1',
+    };
+    store.record(aggregate);
+    now = 2_000;
+    store.record(aggregate);
+    let overview = store.overview();
+    expect(overview.eventCount).toBe(1);
+    expect(overview.observationCount).toBe(2);
+    expect(overview.firstTimestamp).toBe(1);
+    expect(overview.lastTimestamp).toBe(2_000);
+    now = 30 * 86_400_000 + 2;
+    overview = store.overview();
+    expect(overview.eventCount).toBe(0);
+    expect(overview.observationCount).toBe(0);
+    expect(overview.firstTimestamp).toBeNull();
+    expect(overview.lastTimestamp).toBeNull();
+    const { store: empty } = fixture();
+    expect(empty.overview()).toMatchObject({
+      eventCount: 0,
+      observationCount: 0,
+      firstTimestamp: null,
+      lastTimestamp: null,
+    });
   });
 
   it('fails safely for corrupt storage and competing writers without changing the operation', () => {

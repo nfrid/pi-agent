@@ -2,6 +2,7 @@ import { VERSION } from '@earendil-works/pi-coding-agent';
 import {
   BROWSER_TELEMETRY_CODES,
   type BrowserTelemetryInput,
+  isSafeTelemetryErrorName,
   TELEMETRY_MAX_NOTE_LENGTH,
   type TelemetryEvent,
   type TelemetryOverview,
@@ -18,7 +19,8 @@ export function parseBrowserTelemetryInput(
   const input = value as Record<string, unknown>;
   if (
     Object.keys(input).some(
-      (key) => !['code', 'version', 'note', 'sessionId'].includes(key),
+      (key) =>
+        !['code', 'version', 'note', 'sessionId', 'errorName'].includes(key),
     ) ||
     typeof input.code !== 'string' ||
     !(
@@ -30,6 +32,14 @@ export function parseBrowserTelemetryInput(
     (input.sessionId !== undefined &&
       (typeof input.sessionId !== 'string' ||
         !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,95}$/.test(input.sessionId))) ||
+    (input.errorName !== undefined &&
+      (!isSafeTelemetryErrorName(input.errorName) ||
+        ![
+          'uncaught-error',
+          'unhandled-rejection',
+          'resize-observer-loop',
+          'render-error',
+        ].includes(input.code))) ||
     (input.code === 'manual-report'
       ? typeof input.note !== 'string' ||
         !input.note.trim() ||
@@ -97,6 +107,7 @@ export class DashboardTelemetry {
                 : 'failure',
         ...(input.note ? { note: input.note } : {}),
         ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+        ...(input.errorName ? { errorName: input.errorName } : {}),
       }),
     };
   }

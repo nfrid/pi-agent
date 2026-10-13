@@ -1,6 +1,7 @@
-import type {
-  BrowserTelemetryCode,
-  BrowserTelemetryInput,
+import {
+  type BrowserTelemetryCode,
+  type BrowserTelemetryInput,
+  safeTelemetryErrorName,
 } from '@pi-agent/telemetry/contracts';
 import { dashboardHttpClient } from '@pi-dashboard/client';
 
@@ -45,12 +46,16 @@ export async function flushBrowserTelemetry(): Promise<void> {
   }
 }
 
-export function reportBrowserTelemetry(code: BrowserTelemetryCode): void {
+export function reportBrowserTelemetry(
+  code: BrowserTelemetryCode,
+  errorName?: BrowserTelemetryInput['errorName'],
+): void {
   if (pending.length >= 20) pending.shift();
   pending.push({
     code,
     version: telemetryBuildVersion,
     sessionId: sessionId(),
+    ...(errorName ? { errorName } : {}),
   });
   void flushBrowserTelemetry();
 }
@@ -67,8 +72,26 @@ export async function reportDashboardQuirk(note: string): Promise<boolean> {
 }
 
 export function installBrowserTelemetry(): () => void {
-  const error = () => reportBrowserTelemetry('uncaught-error');
-  const rejection = () => reportBrowserTelemetry('unhandled-rejection');
+  const error = (event: ErrorEvent) => {
+    const code =
+      event.message === 'ResizeObserver loop limit exceeded' ||
+      event.message ===
+        'ResizeObserver loop completed with undelivered notifications.'
+        ? 'resize-observer-loop'
+        : 'uncaught-error';
+    const errorName =
+      event.error instanceof Error
+        ? safeTelemetryErrorName(event.error)
+        : undefined;
+    reportBrowserTelemetry(code, errorName);
+  };
+  const rejection = (event: PromiseRejectionEvent) => {
+    const errorName =
+      event.reason instanceof Error
+        ? safeTelemetryErrorName(event.reason)
+        : undefined;
+    reportBrowserTelemetry('unhandled-rejection', errorName);
+  };
   const online = () => {
     void flushBrowserTelemetry();
   };

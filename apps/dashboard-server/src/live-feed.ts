@@ -130,7 +130,7 @@ interface Subscriber<TSnapshot, TEvent> {
   deferred: Array<QueuedFeedItem<TSnapshot, TEvent>>;
   deferredBytes: number;
   waiting?: {
-    resolve: (item: FeedItem<TSnapshot, TEvent>) => void;
+    resolve: (item: FeedItem<TSnapshot, TEvent> | undefined) => void;
     reject: (error: Error) => void;
   };
   closed: boolean;
@@ -422,8 +422,7 @@ export class BoundedFeed<TSnapshot, TEvent> {
       closed: false,
     };
     this.subscribers.add(subscriber);
-    const abort = () =>
-      this.closeSubscriber(subscriber, new Error('Subscription aborted.'));
+    const abort = () => this.closeSubscriber(subscriber);
     if (options.signal?.aborted) abort();
     else options.signal?.addEventListener('abort', abort, { once: true });
 
@@ -509,6 +508,7 @@ export class BoundedFeed<TSnapshot, TEvent> {
 
       while (!subscriber.closed) {
         const item = await this.next(subscriber);
+        if (item === undefined) break;
         yield item;
         // A producer may overflow and close the queue while the consumer is
         // paused at the preceding yield. Propagate retryable overflow instead
@@ -610,7 +610,7 @@ export class BoundedFeed<TSnapshot, TEvent> {
 
   private next(
     subscriber: Subscriber<TSnapshot, TEvent>,
-  ): Promise<FeedItem<TSnapshot, TEvent>> {
+  ): Promise<FeedItem<TSnapshot, TEvent> | undefined> {
     if (subscriber.queue.length > 0) {
       const queued = subscriber.queue.shift() as QueuedFeedItem<
         TSnapshot,
@@ -642,7 +642,8 @@ export class BoundedFeed<TSnapshot, TEvent> {
     if (subscriber.waiting) {
       const waiting = subscriber.waiting;
       subscriber.waiting = undefined;
-      waiting.reject(error ?? new Error('Subscription closed.'));
+      if (error) waiting.reject(error);
+      else waiting.resolve(undefined);
     }
     this.subscribers.delete(subscriber);
   }

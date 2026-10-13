@@ -27,6 +27,92 @@ function shellSnapshot(sequence: number) {
 }
 
 describe('production tRPC feed procedures', () => {
+  it('does not record failure telemetry when a client unsubscribes', async () => {
+    const app = Fastify();
+    const feed = new ShellFeed({ generation: 'generation' });
+    const telemetryRecords: unknown[] = [];
+    const telemetry = {
+      record(event: unknown) {
+        telemetryRecords.push(event);
+      },
+    } as unknown as DashboardTrpcContext['telemetry'];
+    const context: DashboardTrpcContext = {
+      telemetry,
+      serverId: () => 'server-generation',
+      protocolVersion: 3,
+      snapshot: () => shellSnapshot(feed.sequence),
+      shellSnapshot: () => ({
+        snapshot: shellSnapshot(feed.sequence),
+        cursor: feed.sequence,
+      }),
+      shellFeed: feed,
+      shellSnapshotAt: (sequence) => ({
+        snapshot: shellSnapshot(sequence),
+        cursor: sequence,
+      }),
+    };
+    registerDashboardTrpc(app, context);
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === 'string') throw new Error('No port.');
+    const client = createTRPCClient<DashboardRouter>({
+      links: [
+        httpSubscriptionLink({
+          url: `http://127.0.0.1:${address.port}/trpc`,
+          EventSource,
+          eventSourceOptions: {
+            fetch: async (input, init) => {
+              const headers = new Headers(init?.headers);
+              headers.set('x-dashboard-protocol-version', '3');
+              return fetch(input, { ...init, headers });
+            },
+          },
+        }),
+      ],
+    });
+    let resolveSnapshot!: () => void;
+    const receivedSnapshot = new Promise<void>((resolve) => {
+      resolveSnapshot = resolve;
+    });
+    const subscription = client.shellSubscribe.subscribe(
+      {},
+      {
+        onData() {
+          resolveSnapshot();
+        },
+      },
+    );
+    let startTimeout!: ReturnType<typeof setTimeout>;
+    try {
+      await Promise.race([
+        receivedSnapshot,
+        new Promise<never>((_, reject) => {
+          startTimeout = setTimeout(
+            () => reject(new Error('subscription did not start')),
+            5_000,
+          );
+        }),
+      ]).finally(() => clearTimeout(startTimeout));
+      expect(feed.metrics().subscribers).toBe(1);
+      subscription.unsubscribe();
+      for (
+        let attempt = 0;
+        attempt < 50 && feed.metrics().subscribers;
+        attempt++
+      )
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(feed.metrics().subscribers).toBe(0);
+      expect(telemetryRecords).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ outcome: 'failure' }),
+        ]),
+      );
+    } finally {
+      subscription.unsubscribe();
+      await app.close();
+    }
+  });
+
   it('httpSubscriptionLink reconnects with tracked input and auth headers', async () => {
     const app = Fastify();
     const feed = new ShellFeed({ generation: 'generation' });

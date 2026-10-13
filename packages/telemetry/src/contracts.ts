@@ -54,13 +54,19 @@ export interface TelemetryOverview {
   available: boolean;
   retentionDays: number;
   maxEvents: number;
+  /** Number of stored SQLite rows, bounded by maxEvents. */
   eventCount: number;
+  /** Total represented observations, including aggregated occurrences. */
+  observationCount: number;
+  firstTimestamp: number | null;
+  lastTimestamp: number | null;
   issues: TelemetryIssue[];
 }
 
 export const BROWSER_TELEMETRY_CODES = [
   'uncaught-error',
   'unhandled-rejection',
+  'resize-observer-loop',
   'render-error',
   'connection-error',
   'authentication',
@@ -69,11 +75,46 @@ export const BROWSER_TELEMETRY_CODES = [
 ] as const;
 export type BrowserTelemetryCode = (typeof BROWSER_TELEMETRY_CODES)[number];
 
+export const SAFE_TELEMETRY_ERROR_NAMES = [
+  'Error',
+  'TypeError',
+  'RangeError',
+  'SyntaxError',
+  'ReferenceError',
+  'URIError',
+  'AggregateError',
+  'AbortError',
+  'TimeoutError',
+] as const;
+export type SafeTelemetryErrorName =
+  (typeof SAFE_TELEMETRY_ERROR_NAMES)[number];
+
+export function safeTelemetryErrorName(error: unknown): SafeTelemetryErrorName {
+  try {
+    const name = error instanceof Error ? error.name : '';
+    return (SAFE_TELEMETRY_ERROR_NAMES as readonly string[]).includes(name)
+      ? (name as SafeTelemetryErrorName)
+      : 'Error';
+  } catch {
+    return 'Error';
+  }
+}
+
+export function isSafeTelemetryErrorName(
+  value: unknown,
+): value is SafeTelemetryErrorName {
+  return (
+    typeof value === 'string' &&
+    (SAFE_TELEMETRY_ERROR_NAMES as readonly string[]).includes(value)
+  );
+}
+
 export interface BrowserTelemetryInput {
   code: BrowserTelemetryCode | 'manual-report';
   version: string;
   note?: string;
   sessionId?: string;
+  errorName?: SafeTelemetryErrorName;
 }
 
 /** Free-text reports are deliberate; redaction is not a general secret detector. */
