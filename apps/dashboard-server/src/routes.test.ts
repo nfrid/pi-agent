@@ -82,6 +82,50 @@ function context(): DashboardRouteContext {
 }
 
 describe('Fastify dashboard route plugin', () => {
+  it('accepts authenticated foreground reports with bounded validated fields', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    routeContext.reportPushForeground = vi.fn();
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+    const headers = {
+      origin: 'http://dashboard.test',
+      'x-dashboard-token': 'route-token',
+    };
+    const report = {
+      endpoint: 'https://push.example.test/subscription',
+      tabId: 'tab-1',
+      visible: true,
+      focused: true,
+      sessionId: 'thread/one',
+    };
+    const accepted = await app.inject({
+      method: 'POST',
+      url: '/api/push/foreground',
+      headers,
+      payload: report,
+    });
+    expect(accepted.statusCode).toBe(204);
+    expect(routeContext.reportPushForeground).toHaveBeenCalledWith(report);
+
+    const unauthenticated = await app.inject({
+      method: 'POST',
+      url: '/api/push/foreground',
+      headers: { origin: 'http://dashboard.test' },
+      payload: report,
+    });
+    expect(unauthenticated.statusCode).toBe(401);
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/api/push/foreground',
+      headers,
+      payload: { ...report, endpoint: `https://push.test/${'x'.repeat(2048)}` },
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(routeContext.reportPushForeground).toHaveBeenCalledOnce();
+  });
+
   it('creates an external thread with originless Bearer and rejects originless x token', async () => {
     const app = Fastify();
     apps.push(app);

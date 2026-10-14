@@ -10,6 +10,7 @@ import { DraftPromotionLifecycle } from '../features/draft-promotion-lifecycle';
 import { FileViewerProvider } from '../features/file-viewer/context';
 import { Header } from '../features/navigation';
 import { NewThreadProjectChooser } from '../features/new-thread-project-chooser';
+import { PushForegroundPresence } from '../features/push-foreground';
 import { SessionNavigationContext } from '../features/session-navigation-context';
 import { type SurfacePage, SurfaceStack } from '../features/surface-stack';
 import { useDashboardContext } from './dashboard-context';
@@ -79,6 +80,7 @@ export function RouteShell() {
   return (
     <div className="app">
       <DraftPromotionLifecycle snapshot={dashboard.snapshot} />
+      <PushForegroundPresence pathname={routeState.pathname} />
       <DashboardSurfaceProvider
         blocked={false}
         locationKey={routeState.pathname}

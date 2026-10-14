@@ -634,6 +634,7 @@ export class DashboardServerImpl implements DashboardServer {
         this.changed();
       },
       pushSubscribe: (body) => this.savePushSubscription(body),
+      reportPushForeground: (report) => this.push.reportForeground?.(report),
       vapidPublicKey: () => process.env.PI_DASHBOARD_VAPID_PUBLIC_KEY ?? null,
       assertMutationsOpen: () => this.assertMutationsOpen(),
       adoptProject: (command) => {

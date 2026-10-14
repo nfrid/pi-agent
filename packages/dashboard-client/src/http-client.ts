@@ -1472,6 +1472,24 @@ export class DashboardHttpClient {
     });
   }
 
+  async reportPushForeground(
+    report: {
+      endpoint: string;
+      tabId: string;
+      visible: boolean;
+      focused: boolean;
+      sessionId?: string;
+      runtimeId?: string;
+    },
+    keepalive = false,
+  ): Promise<void> {
+    await this.request('/api/push/foreground', {
+      method: 'POST',
+      body: JSON.stringify(report),
+      keepalive,
+    });
+  }
+
   async readNotification(id: string): Promise<unknown> {
     return this.request(`/api/notifications/${encodeURIComponent(id)}/read`, {
       method: 'POST',

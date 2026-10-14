@@ -79,6 +79,7 @@ describe('PWA assets', () => {
     expect(serviceWorker).not.toContain('addAll');
     expect(serviceWorker).not.toContain('client.navigate(client.url)');
     expect(serviceWorker).toContain('showNotification');
+    expect(serviceWorker).toContain("icon: '/icons/icon-192.png'");
 
     const main = readFileSync(new URL('./main.tsx', import.meta.url), 'utf8');
     expect(main).toContain(

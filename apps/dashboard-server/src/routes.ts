@@ -63,6 +63,7 @@ import sharp from 'sharp';
 import { Type } from 'typebox';
 import { classifyDashboardError } from './application/error-classification.js';
 import type { SessionFeedRegistry, ShellFeed } from './live-feeds.js';
+import type { PushForegroundReport } from './push.js';
 import { allowedOrigin, authorizeRequest } from './security.js';
 import type { DashboardTelemetry } from './telemetry.js';
 import { registerDashboardTrpc } from './trpc.js';
@@ -234,6 +235,7 @@ export interface DashboardRouteContext {
   markNotificationRead(id: string): void;
   markAllNotificationsRead(): void;
   pushSubscribe(body: unknown): void;
+  reportPushForeground?(report: PushForegroundReport): void;
   vapidPublicKey(): string | null;
   /** Reject mutating requests once daemon teardown has begun. */
   assertMutationsOpen?(): void;
@@ -1368,6 +1370,32 @@ export const dashboardRoutes: FastifyPluginAsync<{
     async (request) => {
       context.markNotificationRead(request.params.id);
       return { ok: true };
+    },
+  );
+  app.post(
+    '/api/push/foreground',
+    {
+      schema: {
+        body: Type.Object(
+          {
+            endpoint: Type.String({ minLength: 1, maxLength: 2048 }),
+            tabId: Type.String({ minLength: 1, maxLength: 128 }),
+            visible: Type.Boolean(),
+            focused: Type.Boolean(),
+            sessionId: Type.Optional(
+              Type.String({ minLength: 1, maxLength: 256 }),
+            ),
+            runtimeId: Type.Optional(
+              Type.String({ minLength: 1, maxLength: 256 }),
+            ),
+          },
+          { additionalProperties: false },
+        ),
+      },
+    },
+    async (request, reply) => {
+      context.reportPushForeground?.(request.body as PushForegroundReport);
+      return reply.code(204).send();
     },
   );
   app.post(

@@ -69,6 +69,7 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(data.title || 'Pi Dashboard', {
       body: data.body || 'Pi needs attention',
+      icon: '/icons/icon-192.png',
       tag:
         data.kind && data.runtimeId
           ? `${data.kind}-${data.runtimeId}`
