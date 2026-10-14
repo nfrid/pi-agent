@@ -118,9 +118,7 @@ export function DraftThreadView({
   snapshot: BrowserSnapshot;
 }) {
   const drafts = useDrafts();
-  const draft = drafts.find((candidate) => candidate.id === draftId);
-  const fallbackDraft =
-    draft ?? readDrafts().find((candidate) => candidate.id === draftId);
+  const fallbackDraft = drafts.find((candidate) => candidate.id === draftId);
   const project = snapshot.projects?.find(
     (candidate) => candidate.id === fallbackDraft?.projectId,
   );

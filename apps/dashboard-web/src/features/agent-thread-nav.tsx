@@ -267,9 +267,11 @@ export function activeThreadDetails(
 function QuickDeleteDraftAction({
   draftId,
   title,
+  onDelete,
 }: {
   draftId: string;
   title: string;
+  onDelete: (draftId: string) => void;
 }) {
   return (
     <button
@@ -279,7 +281,7 @@ function QuickDeleteDraftAction({
       title="Delete draft"
       onClick={(event) => {
         event.stopPropagation();
-        deleteDraft(draftId);
+        onDelete(draftId);
       }}
     >
       <span aria-hidden="true">×</span>
@@ -1027,6 +1029,10 @@ export function AgentThreadNav({
     openSettings,
     mode === 'home' || !isMobile || open,
   );
+  const removeDraft = (draftId: string) => {
+    deleteDraft(draftId);
+    if (draftId === currentDraftId) go('/projects', { replace: true });
+  };
   const renderThreadRow = (row: AgentThreadRow, density: 'card' | 'slim') => {
     const shortcutIndex = shortcutTargetIds.indexOf(row.id);
     const shortcutHint = shortcutIndex >= 0 ? shortcutIndex + 1 : undefined;
@@ -1105,7 +1111,11 @@ export function AgentThreadNav({
           shortcutHintsVisible={shortcutHintsVisible}
         />
         {row.draft && (
-          <QuickDeleteDraftAction draftId={row.id} title={row.title} />
+          <QuickDeleteDraftAction
+            draftId={row.id}
+            title={row.title}
+            onDelete={removeDraft}
+          />
         )}
         {canSettleThread(row) && row.durableThread && (
           <QuickSettleThreadAction
@@ -1129,7 +1139,7 @@ export function AgentThreadNav({
               onClick={(event) => {
                 event.stopPropagation();
                 closeMenu();
-                deleteDraft(row.id);
+                removeDraft(row.id);
               }}
             >
               Delete draft
