@@ -49,7 +49,7 @@ async function prepareDrafts(
   });
 }
 
-test('deleting the open draft returns to the projects page', async ({
+test('deleting the open draft returns to the thread picker', async ({
   page,
 }) => {
   await prepareDrafts(page, [draft('draft-active', 'Active draft')]);
@@ -61,8 +61,10 @@ test('deleting the open draft returns to the projects page', async ({
 
   await page.getByRole('button', { name: 'Delete draft Active draft' }).click();
 
-  await expect(page).toHaveURL('/projects');
-  await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible();
+  await expect(page).toHaveURL('/');
+  await expect(
+    page.getByRole('heading', { name: 'Pick a thread to continue' }),
+  ).toBeVisible();
   expect(
     await page.evaluate(() => localStorage.getItem('pi-dashboard-drafts:v1')),
   ).toBe('[]');

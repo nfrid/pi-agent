@@ -1031,7 +1031,7 @@ export function AgentThreadNav({
   );
   const removeDraft = (draftId: string) => {
     deleteDraft(draftId);
-    if (draftId === currentDraftId) go('/projects', { replace: true });
+    if (draftId === currentDraftId) go('/', { replace: true });
   };
   const renderThreadRow = (row: AgentThreadRow, density: 'card' | 'slim') => {
     const shortcutIndex = shortcutTargetIds.indexOf(row.id);
