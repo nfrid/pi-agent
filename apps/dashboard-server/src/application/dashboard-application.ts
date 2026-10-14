@@ -1855,7 +1855,12 @@ export class DashboardApplication {
     if (this.notifications.shouldPersistRuntime(change))
       this.metadata.saveRuntime(change.snapshot);
     this.manager.onRegistryChange(change);
-    this.notifications.handle(change);
+    this.notifications.handle(
+      change,
+      change.kind === 'event' && change.event.type === 'agent.settled'
+        ? this.activeTranscripts.get(change.snapshot.session.id)?.projection
+        : undefined,
+    );
     const provenance = {
       ...(change.runtimeEpoch === undefined
         ? {}

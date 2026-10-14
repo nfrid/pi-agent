@@ -42,6 +42,7 @@ afterEach(async () => {
     await rm(fixture.root, { recursive: true, force: true });
   }
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 async function fixture(
@@ -207,6 +208,66 @@ function activeTranscriptState(
 }
 
 describe('authoritative application snapshot lifecycle', () => {
+  it('notifies from the active transcript when settled snapshot entries are empty', async () => {
+    vi.stubEnv('PI_DASHBOARD_NOTIFY_SETTLED', '1');
+    const value = await fixture('live-notification-session');
+    const liveRuntime = runtime(value.file, {
+      session: {
+        id: 'live-notification-session',
+        file: value.file,
+        name: 'External named session',
+        entries: [],
+        entriesComplete: false,
+      },
+    });
+    value.register(liveRuntime);
+    value.event(
+      liveRuntime,
+      {
+        type: 'message.finished',
+        sessionId: 'live-notification-session',
+        message: {
+          messageId: 'live-final-answer',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Answer from the live transcript.' }],
+        },
+      },
+      'epoch-1',
+      2,
+    );
+    value.event(
+      liveRuntime,
+      {
+        type: 'agent.settled',
+        sessionId: 'live-notification-session',
+        closure: {
+          id: 'closure-marker',
+          type: 'custom',
+          customType: 'response-closure',
+          data: {
+            requestMessageId: 'persisted-request',
+            finalMessageId: 'persisted-final-answer',
+            liveFinalMessageId: 'live-final-answer',
+            startedAt: 1,
+            endedAt: 2,
+          },
+        },
+      },
+      'epoch-1',
+      3,
+    );
+
+    expect(value.metadata.unreadNotifications()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'settled',
+          title: 'External named session',
+          body: 'Answer from the live transcript.',
+        }),
+      ]),
+    );
+  });
+
   it('classifies an auxiliary runtime while its session file is not indexed', async () => {
     const value = await fixture(
       'offline-fallback-fixture',
