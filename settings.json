@@ -3,8 +3,12 @@
   "defaultProvider": "openai",
   "defaultModel": "gpt-6-astra",
   "defaultThinkingLevel": "medium",
-  "defaultTools": ["+codemode"],
-  "extensions": ["-builtin:codemode"],
+  "defaultTools": [
+    "+codemode"
+  ],
+  "extensions": [
+    "-builtin:codemode"
+  ],
   "codemode": {
     "mode": "on"
   },
@@ -78,5 +82,6 @@
       }
     }
   },
-  "deviceId": "fff93d35-7684-41f6-ba09-24dc829b0aac"
+  "deviceId": "fff93d35-7684-41f6-ba09-24dc829b0aac",
+  "tuiMode": "regular"
 }
