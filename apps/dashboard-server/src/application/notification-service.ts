@@ -16,12 +16,6 @@ function isTranscriptEvent(change: RegistryChange): boolean {
   );
 }
 
-function isSessionReplacementGoodbye(change: RegistryChange): boolean {
-  if (change.kind !== 'event' || change.event.type !== 'runtime.goodbye')
-    return false;
-  return ['new', 'resume', 'fork'].includes(change.event.reason ?? '');
-}
-
 const SETTLED_BODY_LIMIT = 240;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -159,25 +153,38 @@ export class NotificationService {
     }
     if (change.kind !== 'event') return;
     const event = change.event;
+    const failedGoodbye =
+      event.type === 'runtime.goodbye' &&
+      change.snapshot.liveState === 'failed';
     const shouldNotify =
-      (event.type === 'runtime.goodbye' &&
-        !isSessionReplacementGoodbye(change)) ||
+      failedGoodbye ||
       (event.type === 'agent.settled' &&
         process.env.PI_DASHBOARD_NOTIFY_SETTLED === '1');
     if (!shouldNotify) return;
     this.publish({
-      id: `${event.type}-${change.snapshot.runtimeId}-${Date.now()}`,
-      kind: event.type === 'agent.settled' ? 'settled' : 'runtime-exited',
+      id: `${failedGoodbye ? 'failed' : event.type}-${change.snapshot.runtimeId}-${Date.now()}`,
+      kind:
+        event.type === 'agent.settled'
+          ? 'settled'
+          : failedGoodbye
+            ? 'failed'
+            : 'runtime-exited',
       runtimeId: change.snapshot.runtimeId,
       sessionId: change.snapshot.session.id,
       title:
         event.type === 'agent.settled'
           ? settledNotificationTitle(this.metadata, change.snapshot)
-          : 'Pi runtime exited',
+          : failedGoodbye
+            ? 'Pi runtime failed'
+            : 'Pi runtime exited',
       body:
         event.type === 'agent.settled'
           ? finalAssistantText(change, projection) || 'Turn completed.'
-          : (change.snapshot.session.name ?? change.snapshot.cwd),
+          : failedGoodbye
+            ? (change.snapshot.lastError ??
+              change.snapshot.session.name ??
+              change.snapshot.cwd)
+            : (change.snapshot.session.name ?? change.snapshot.cwd),
       createdAt: Date.now(),
     });
   }

@@ -243,20 +243,26 @@ describe('remote-control session lifecycle', () => {
     'new',
     'resume',
     'fork',
-  ])('announces %s before stopping the old bridge when a replacement tears down its extension runtime', (reason) => {
+  ])('announces %s before gracefully stopping the old bridge when a replacement tears down its extension runtime', async (reason) => {
     const sendEvent = vi.fn(() => true);
     const stop = vi.fn();
+    const stopGracefully = vi.fn(async () => undefined);
     const clearContext = vi.fn();
     const stopSteeringUpdates = vi.fn();
     const runtime = {
-      client: { sendEvent, stop },
+      client: { sendEvent, stop, stopGracefully },
       isCurrent: () => true,
       clearContext,
       snapshot: () => snapshot,
     } as unknown as Parameters<typeof shutdownRemoteControlRuntime>[0];
     const ctx = {} as ExtensionContext;
 
-    shutdownRemoteControlRuntime(runtime, { reason }, ctx, stopSteeringUpdates);
+    await shutdownRemoteControlRuntime(
+      runtime,
+      { reason },
+      ctx,
+      stopSteeringUpdates,
+    );
 
     expect(stopSteeringUpdates).toHaveBeenCalledOnce();
     expect(clearContext).toHaveBeenCalledWith(ctx);
@@ -265,23 +271,25 @@ describe('remote-control session lifecycle', () => {
       type: 'runtime.goodbye',
       reason,
     });
-    expect(sendEvent.mock.invocationCallOrder[0]).toBeLessThan(
-      stop.mock.invocationCallOrder[0],
-    );
-    expect(stop).toHaveBeenCalledOnce();
+    expect(stopGracefully).toHaveBeenCalledOnce();
+    expect(stop).not.toHaveBeenCalled();
   });
 
-  it.each(['quit', 'reload'])('announces %s and stops the bridge', (reason) => {
+  it.each([
+    'quit',
+    'reload',
+  ])('announces %s and stops the bridge', async (reason) => {
     const sendEvent = vi.fn(() => true);
     const stop = vi.fn();
+    const stopGracefully = vi.fn(async () => undefined);
     const runtime = {
-      client: { sendEvent, stop },
+      client: { sendEvent, stop, stopGracefully },
       isCurrent: () => true,
       clearContext: vi.fn(),
       snapshot: () => snapshot,
     } as unknown as Parameters<typeof shutdownRemoteControlRuntime>[0];
 
-    shutdownRemoteControlRuntime(
+    await shutdownRemoteControlRuntime(
       runtime,
       { reason },
       {} as ExtensionContext,
@@ -292,7 +300,8 @@ describe('remote-control session lifecycle', () => {
       type: 'runtime.goodbye',
       reason,
     });
-    expect(stop).toHaveBeenCalledOnce();
+    expect(stopGracefully).toHaveBeenCalledOnce();
+    expect(stop).not.toHaveBeenCalled();
   });
 });
 
@@ -2150,6 +2159,151 @@ describe('remote-control bridge', () => {
       { seq: 2, type: 'session.snapshot' },
     ]);
     client.stop();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  it('flushes a queued goodbye before bounded graceful teardown', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-bridge-goodbye-'),
+    );
+    const socketPath = path.join(directory, 'bridge.sock');
+    const received: Array<Record<string, unknown>> = [];
+    let buffer = '';
+    let connections = 0;
+    let serverSocket: net.Socket | undefined;
+    const server = net.createServer((socket) => {
+      connections += 1;
+      serverSocket = socket;
+      socket.pause();
+      socket.setEncoding('utf8');
+      socket.on('data', (chunk) => {
+        buffer += String(chunk);
+        let newline = buffer.indexOf('\n');
+        while (newline >= 0) {
+          const line = buffer.slice(0, newline).trim();
+          buffer = buffer.slice(newline + 1);
+          if (line) received.push(JSON.parse(line) as Record<string, unknown>);
+          newline = buffer.indexOf('\n');
+        }
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+    const client = new BridgeClient({
+      socketPath,
+      runtimeId: 'runtime-goodbye',
+      snapshot: () => snapshot,
+      handleCommand: async () => ({ accepted: true }),
+    });
+    client.start();
+    await waitFor(() => serverSocket !== undefined);
+    await waitFor(() => {
+      const socket = (client as unknown as { socket?: net.Socket }).socket;
+      return socket !== undefined && !socket.connecting;
+    });
+    const clientSocket = (client as unknown as { socket: net.Socket }).socket;
+    const backpressure = client as unknown as {
+      writeBlocked: boolean;
+      outboundQueue: unknown[];
+      pumpOutbound(socket: net.Socket): void;
+    };
+    clientSocket.cork();
+    backpressure.writeBlocked = true;
+    expect(client.sendEvent({ type: 'runtime.goodbye', reason: 'quit' })).toBe(
+      true,
+    );
+    expect(backpressure.outboundQueue.length).toBeGreaterThan(0);
+    const gracefulStop = client.stopGracefully(500);
+    expect(client.stopGracefully(1)).toBe(gracefulStop);
+    expect(clientSocket.destroyed).toBe(false);
+    expect(backpressure.outboundQueue.length).toBeGreaterThan(0);
+    backpressure.writeBlocked = false;
+    backpressure.pumpOutbound(clientSocket);
+    clientSocket.uncork();
+    serverSocket?.resume();
+    await gracefulStop;
+
+    expect(
+      received.map((frame) => (frame.event as { type?: string }).type),
+    ).toContain('runtime.goodbye');
+    expect(clientSocket.destroyed).toBe(true);
+
+    client.start();
+    await waitFor(() => connections === 2);
+    await waitFor(() => {
+      const socket = (client as unknown as { socket?: net.Socket }).socket;
+      return socket !== undefined && !socket.connecting;
+    });
+    const restartedSocket = (client as unknown as { socket: net.Socket })
+      .socket;
+    serverSocket?.resume();
+    const secondStop = client.stopGracefully(500);
+    await secondStop;
+    expect(restartedSocket.destroyed).toBe(true);
+    await new Promise<void>((resolve) => setTimeout(resolve, 300));
+    expect(connections).toBe(2);
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  it('bounds graceful teardown when queued output never drains', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-bridge-timeout-'),
+    );
+    const socketPath = path.join(directory, 'bridge.sock');
+    let connections = 0;
+    let serverSocket: net.Socket | undefined;
+    const server = net.createServer((socket) => {
+      connections += 1;
+      serverSocket = socket;
+      socket.pause();
+    });
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+    const client = new BridgeClient({
+      socketPath,
+      runtimeId: 'runtime-timeout',
+      snapshot: () => snapshot,
+      handleCommand: async () => ({ accepted: true }),
+    });
+    client.start();
+    await waitFor(() => connections === 1);
+    await waitFor(() => {
+      const socket = (client as unknown as { socket?: net.Socket }).socket;
+      return socket !== undefined && !socket.connecting;
+    });
+    const socket = (client as unknown as { socket: net.Socket }).socket;
+    socket.cork();
+    const state = client as unknown as {
+      writeBlocked: boolean;
+      outboundQueue: unknown[];
+      socket?: net.Socket;
+    };
+    state.writeBlocked = true;
+    client.sendEvent({ type: 'runtime.goodbye', reason: 'quit' });
+    expect(state.outboundQueue.length).toBeGreaterThan(0);
+
+    const stopped = client.stopGracefully(30);
+    let deadline: NodeJS.Timeout | undefined;
+    const bounded = Promise.race([
+      stopped,
+      new Promise<never>((_, reject) => {
+        deadline = setTimeout(
+          () => reject(new Error('graceful stop exceeded bound')),
+          200,
+        );
+      }),
+    ]);
+    try {
+      await expect(bounded).resolves.toBeUndefined();
+    } finally {
+      if (deadline) clearTimeout(deadline);
+    }
+    expect(socket.destroyed).toBe(true);
+    expect(state.outboundQueue).toHaveLength(0);
+    expect(state.socket).toBeUndefined();
+    serverSocket?.resume();
+    await new Promise<void>((resolve) => setTimeout(resolve, 300));
+    expect(connections).toBe(1);
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(directory, { recursive: true, force: true });
   });

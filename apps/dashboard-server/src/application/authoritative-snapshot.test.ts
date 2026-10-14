@@ -349,6 +349,47 @@ describe('authoritative application snapshot lifecycle', () => {
     expect(value.app.sessionMetadata([ordinaryRuntime])).toEqual([]);
   });
 
+  it('suppresses clean user and unindexed delegate goodbyes', async () => {
+    const value = await fixture(
+      'goodbye-fixture',
+      [{ type: 'session', id: 'goodbye-fixture', cwd: '/tmp/snapshot' }],
+      undefined,
+      undefined,
+      true,
+    );
+    const delegateFile = path.join(
+      value.root,
+      '.delegate-sessions',
+      'goodbye-delegate.jsonl',
+    );
+    await writeFile(
+      delegateFile,
+      `${JSON.stringify({
+        type: 'session',
+        id: 'goodbye-delegate',
+        cwd: '/tmp/snapshot',
+        sessionKind: 'delegate',
+        parentSessionId: 'parent-session',
+      })}\n`,
+    );
+    const notify = vi.fn(async () => undefined);
+    value.app.setPush({ notify });
+
+    value.event(
+      runtime(delegateFile, {
+        session: { id: 'goodbye-delegate', file: delegateFile, entries: [] },
+      }),
+      { type: 'runtime.goodbye', reason: 'quit' },
+    );
+    value.event(
+      runtime(value.file, {
+        session: { id: 'goodbye-user', file: value.file, entries: [] },
+      }),
+      { type: 'runtime.goodbye', reason: 'reload' },
+    );
+    expect(notify).not.toHaveBeenCalled();
+  });
+
   it('publishes an initial metadata delta for an unindexed online delegate', async () => {
     const value = await fixture(
       'online-delta-fixture',

@@ -97,12 +97,12 @@ export function emitCompactionCompleted(
   emitCompactionSettled(runtime, ctx, reason);
 }
 
-export function shutdownRemoteControlRuntime(
+export async function shutdownRemoteControlRuntime(
   runtime: import('./runtime').RemoteControlRuntime,
   event: { reason: string },
   ctx: ExtensionContext,
   stopRuntimeUpdates: () => void,
-): void {
+): Promise<void> {
   stopRuntimeUpdates();
   const announcesTermination =
     event.reason === 'quit' || event.reason === 'reload';
@@ -127,7 +127,9 @@ export function shutdownRemoteControlRuntime(
   // Pi tears down the entire extension runtime for every session replacement,
   // not only quit/reload. Leaving this bridge alive captures the old `pi` and
   // command context, which become stale as soon as the replacement is bound.
-  runtime.client.stop();
+  if (wasCurrent && (announcesTermination || isSessionReplacement))
+    await runtime.client.stopGracefully();
+  else runtime.client.stop();
 }
 
 type GenericEventAPI = {
@@ -384,7 +386,7 @@ export default defineExtension('remote-control', (pi) => {
     )
       emitState(runtime, ctx);
   });
-  pi.on('session_shutdown', (event, ctx) => {
-    shutdownRemoteControlRuntime(runtime, event, ctx, stopRuntimeUpdates);
+  pi.on('session_shutdown', async (event, ctx) => {
+    await shutdownRemoteControlRuntime(runtime, event, ctx, stopRuntimeUpdates);
   });
 });

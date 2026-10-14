@@ -217,6 +217,7 @@ export function isDroppableBridgeEvent(event: BridgeEvent): boolean {
 export class BridgeClient {
   private socket: net.Socket | undefined;
   private stopped = false;
+  private gracefulStopPromise: Promise<void> | undefined;
   private reconnectTimer: NodeJS.Timeout | undefined;
   private heartbeatTimer: NodeJS.Timeout | undefined;
   private reconnectDelay = RECONNECT_MIN_MS;
@@ -336,12 +337,57 @@ export class BridgeClient {
   }
 
   start(): void {
+    if (this.stopped) this.gracefulStopPromise = undefined;
     this.stopped = false;
     this.bindServices(this.liveSurfaces);
     this.connect();
   }
 
   stop(): void {
+    this.prepareStop();
+    this.clearOutboundQueue();
+    this.socket?.destroy();
+    this.socket = undefined;
+  }
+
+  stopGracefully(timeoutMs = 500): Promise<void> {
+    if (this.gracefulStopPromise) return this.gracefulStopPromise;
+    this.gracefulStopPromise = this.flushAndStop(timeoutMs);
+    return this.gracefulStopPromise;
+  }
+
+  private async flushAndStop(timeoutMs: number): Promise<void> {
+    this.prepareStop();
+    const socket = this.socket;
+    if (!socket || socket.destroyed) {
+      this.clearOutboundQueue();
+      this.socket = undefined;
+      return;
+    }
+    const timeout = setTimeout(() => socket.destroy(), timeoutMs);
+    timeout.unref?.();
+    try {
+      while (
+        !socket.destroyed &&
+        (this.outboundQueue.some((item) => item.socket === socket) ||
+          socket.writableLength > 0)
+      ) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      }
+      if (!socket.destroyed) {
+        await new Promise<void>((resolve) => {
+          socket.once('close', resolve);
+          socket.end();
+        });
+      }
+    } finally {
+      clearTimeout(timeout);
+      this.clearOutboundQueue();
+      if (this.socket === socket) this.socket = undefined;
+    }
+  }
+
+  private prepareStop(): void {
     this.stopped = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = undefined;
@@ -355,9 +401,6 @@ export class BridgeClient {
     this.usageRequestsAvailable = false;
     this.rejectUsageReadyWaiters(new Error('Dashboard bridge stopped.'));
     this.rejectPendingRequests(new Error('Dashboard bridge stopped.'));
-    this.clearOutboundQueue();
-    this.socket?.destroy();
-    this.socket = undefined;
   }
 
   async requestUsage(force = false, signal?: AbortSignal): Promise<unknown> {

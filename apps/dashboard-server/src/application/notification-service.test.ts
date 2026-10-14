@@ -50,7 +50,14 @@ describe('NotificationService runtime shutdowns', () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
-  it.each(['quit', 'reload'])('keeps notifying for %s', (reason) => {
+  it.each([
+    'quit',
+    'reload',
+    'error',
+    'new',
+    'resume',
+    'fork',
+  ])('does not notify for a non-failed %s goodbye', (reason) => {
     const addNotification = vi.fn();
     const notify = vi.fn(async () => undefined);
     const service = new NotificationService(
@@ -59,15 +66,77 @@ describe('NotificationService runtime shutdowns', () => {
     );
 
     service.handle(goodbye(reason));
+    service.handle({
+      ...goodbye(reason),
+      snapshot: {
+        ...snapshot,
+        session: {
+          id: 'delegate-unindexed',
+          file: '/tmp/.delegate-sessions/delegate.jsonl',
+          entries: [],
+        },
+      },
+    });
+
+    expect(addNotification).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'quit',
+    'reload',
+    'other',
+  ])('alerts only when a goodbye snapshot explicitly reports failure (%s)', (reason) => {
+    const addNotification = vi.fn();
+    const notify = vi.fn(async () => undefined);
+    const service = new NotificationService(
+      { addNotification } as unknown as MetadataStore,
+      { notify } as unknown as PushSender,
+    );
+
+    service.handle({
+      ...goodbye(reason),
+      snapshot: {
+        ...snapshot,
+        liveState: 'failed',
+        lastError: 'Failure detail',
+      },
+    });
 
     expect(addNotification).toHaveBeenCalledWith(
       expect.objectContaining({
-        kind: 'runtime-exited',
-        runtimeId: snapshot.runtimeId,
+        kind: 'failed',
+        title: 'Pi runtime failed',
+        body: 'Failure detail',
         sessionId: snapshot.session.id,
       }),
     );
-    expect(notify).toHaveBeenCalledWith(addNotification.mock.calls[0][0]);
+    expect(notify).toHaveBeenCalledOnce();
+  });
+
+  it('keeps true offline and failed runtime notifications', () => {
+    const addNotification = vi.fn();
+    const notify = vi.fn(async () => undefined);
+    const service = new NotificationService(
+      { addNotification } as unknown as MetadataStore,
+      { notify } as unknown as PushSender,
+    );
+
+    service.handle({ kind: 'offline', snapshot });
+    service.handle({
+      kind: 'offline',
+      snapshot: {
+        ...snapshot,
+        runtimeId: 'delegate-runtime',
+        liveState: 'failed',
+        session: { ...snapshot.session, id: 'delegate-session' },
+      },
+    });
+
+    expect(addNotification).toHaveBeenCalledTimes(2);
+    expect(
+      addNotification.mock.calls.map(([notification]) => notification.kind),
+    ).toEqual(['runtime-exited', 'failed']);
   });
 });
 
