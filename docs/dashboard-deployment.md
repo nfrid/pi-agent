@@ -36,6 +36,105 @@ After validating a dashboard change that requires a service restart:
 
 The LaunchAgent templates include `~/.bun/bin` in `PATH`; preserve that entry when installing them so managed agents and background jobs can run workspace commands. A process-host restart terminates its shell jobs and hosted delegate children; arrange a quiet window or explicitly finish/stop them before upgrading that host. Do not delete or clean `apps/**/dist` or `packages/**/dist` while the production service is running: the preview server returns `404` without its bundle. Do not run tests or temporary dashboard servers against the production `dashboard/bridge.sock`; always provide an isolated `stateDir` or `socketPath`. A successful build alone is not a deployment, and a web `200` alone does not prove the bridge daemon is healthy.
 
+## Local macOS notifications
+
+The optional native adapter is for the installed local Chrome PWA at
+`/Applications/Pi Dashboard.app`, bundle ID
+`com.google.Chrome.app.famamklipjamakjadikolcemgkfbbpek`, whose shortcut URL is
+`http://127.0.0.1:4174/`. It never opens a URL through the default browser and
+never targets the HTTPS app under `~/Applications/Chrome Apps.localized`.
+Phone and public HTTPS clients continue to use Web Push.
+
+Build and test without installation, permission prompts, or live notifications:
+
+```sh
+bun run dashboard:notifications test
+```
+
+On the production checkout, after approval, install the signed helper:
+
+```sh
+bun run dashboard:notifications install
+```
+
+This installs only `~/Applications/Pi Dashboard Notifications.app` and registers
+it with LaunchServices. The stable helper bundle ID is
+`com.pi.dashboard.notifications`. Its Pi icon and `LSUIElement` metadata belong
+to the helper, not Chrome. The build uses ad-hoc signing by default. Set
+`PI_NOTIFICATIONS_SIGN_IDENTITY` to a local signing identity for installations
+that need a stable signing identity across updates. Verify macOS notification
+permission after changing the signature or installing a replacement build.
+
+Deploy the dashboard workspaces with the dashboard-only deployment procedure
+above. Do not restart the runtime or process host. The API discovers the helper
+at startup and owns its child and private Unix socket under
+`<stateDir>/notifications/control.sock`. No extra LaunchAgent is required.
+An absent or failed helper does not disable Web Push or runtime controls.
+
+In the installed local PWA, open Settings and select "Enable Mac notifications".
+Only this action requests macOS permission. Successful authorization removes
+only the Web Push endpoint returned by this browser's `getSubscription()` and
+unsubscribes that browser. Other devices remain subscribed. Enabling is
+stored as one private boolean under `<stateDir>/notifications/enabled`. A
+dashboard-only restart restores it only after the helper reports authorized OS
+permission, even with the PWA closed. The adapter also checks permission before
+restoring delivery after a helper disconnect. It does not store a token or Web
+Push endpoint. OS permission persists separately. If macOS denies permission,
+change it in System Settings > Notifications > Pi Dashboard Notifications and
+retry. No
+native delivery runs before an explicit enable. Authorization waits at most two
+minutes; status and diagnostic requests wait at most three seconds. "Cancel
+notification request" cancels activation, not the system dialog. A late grant
+after cancellation or timeout cannot activate native delivery or remove the
+browser subscription. Existing human-completion
+opt-in and delegate suppression still apply.
+
+Native notifications use the project as title and thread as subtitle. The
+completion preview is the existing plain-text final-answer preview. Fault and
+attention notifications retain their original technical title in the body,
+followed by at most 240 characters of detail. Browser and in-app titles are
+unchanged. Foreground suppression uses the same 30-second lease, refreshed every
+10 seconds, with at most 32 tabs per recipient, even after Web Push unsubscribe.
+
+Clicking sends one pending navigation to the authenticated local PWA and
+activates the exact installed bundle through `NSWorkspace.openApplication`.
+The PWA uses its SPA router for `/sessions/<encoded-session-id>`,
+`/runtimes/<encoded-runtime-id>`, or the home fallback `/`.
+The pending click expires after 60 seconds and the PWA acknowledges it after
+navigation. The same path handles a cold helper launch by macOS; the helper
+remembers only its socket path in its own UserDefaults. The API must be running
+and the installed PWA must load the new bundle. Vite's same-origin proxy keeps
+the exact `http://127.0.0.1:4174` Origin on native control, click-stream, and
+foreground requests. Originless EventSource GETs require that exact PWA Referer.
+The API still validates each native tRPC procedure, including procedures in a
+batch. This design does not depend on
+Chrome launch flags, app-shim argument forwarding, manifest launch defaults,
+Accessibility permission, or browser scripting.
+
+### Parent-owned live verification
+
+After installation and dashboard-only deployment, set `API_ORIGIN` to the
+loopback API origin and `SESSION_URL` to an exact local dashboard session URL.
+Pass the existing dashboard token on standard input, never as a URL or argument:
+
+```sh
+printf %s "$PI_DASHBOARD_AUTH_TOKEN" | bun run dashboard:notifications click "$API_ORIGIN" "$SESSION_URL"
+```
+
+This authenticated diagnostic starts the helper if needed and invokes its same
+click handler without requesting permission or sending a notification. A
+`diagnostic` result means the helper accepted the target, not that macOS focus
+or navigation has been observed. Verify that the existing local PWA becomes
+active, switches to the exact thread, and leaves Arc and browser tabs alone.
+Repeat with the PWA closed. Then enable notifications explicitly and verify one
+approved real notification and its click, including a cold helper callback.
+Check focused matching-thread suppression and delivery after lease expiry.
+Neither build/tests nor the diagnostic response prove OS focus or notification
+permission. These live checks remain deployment gates.
+
+The desktop browser test intercepts the production PWA origin and fetches only
+an isolated test preview. It does not connect to a production API or bridge.
+
 ## Project catalogue cutover gate
 
 Use this additional gate when removing the legacy Sesh/workspace catalogue. Do

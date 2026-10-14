@@ -65,7 +65,7 @@ export function SettingsView({ snapshot }: { snapshot: BrowserSnapshot }) {
       >
         <h3 id="settings-alerts-heading">Alert delivery</h3>
         <div className={styles.controls}>
-          <span>Browser push</span>
+          <span>Notifications</span>
           <PushButton />
         </div>
       </section>

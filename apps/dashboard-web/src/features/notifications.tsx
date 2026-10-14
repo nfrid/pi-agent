@@ -4,9 +4,20 @@ import {
   pushVapidPublicKeyQueryOptions,
 } from '@pi-dashboard/client';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import {
+  cancelNativeAuthorization,
+  enableNativeNotifications,
+  nativeStatus,
+} from './native-notifications';
 
 export function PushButton() {
+  const [nativeAvailable, setNativeAvailable] = useState(false);
+  const [nativePending, setNativePending] = useState(false);
+  const [nativeCancelable, setNativeCancelable] = useState(false);
+  const nativeRequest = useRef<
+    { controller: AbortController; committed: boolean } | undefined
+  >(undefined);
   const [status, setStatus] = useState<'off' | 'on' | 'unavailable'>('off');
   const keyQuery = useQuery({
     ...pushVapidPublicKeyQueryOptions(dashboardHttpClient),
@@ -19,6 +30,14 @@ export function PushButton() {
   useEffect(() => {
     let cancelled = false;
     const initialize = async () => {
+      const native = await nativeStatus().catch(() => undefined);
+      if (native?.available) {
+        if (!cancelled) {
+          setNativeAvailable(true);
+          setStatus(native.enabled ? 'on' : 'off');
+        }
+        return;
+      }
       if (
         !('serviceWorker' in navigator) ||
         !('PushManager' in window) ||
@@ -44,7 +63,12 @@ export function PushButton() {
     };
   }, []);
 
-  const enable = async () => {
+  const enable = async (signal: AbortSignal, onNativeCommitted: () => void) => {
+    if (nativeAvailable) {
+      await enableNativeNotifications(signal, onNativeCommitted);
+      setStatus('on');
+      return;
+    }
     if (
       !('serviceWorker' in navigator) ||
       !('PushManager' in window) ||
@@ -78,17 +102,70 @@ export function PushButton() {
   };
 
   return (
-    <button
-      type="button"
-      onClick={() => void enable().catch(() => setStatus('unavailable'))}
-      disabled={status === 'on'}
-    >
-      {status === 'on'
-        ? 'Push enabled'
-        : status === 'unavailable'
-          ? 'Push unavailable'
-          : 'Enable push'}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          const request = {
+            controller: new AbortController(),
+            committed: false,
+          };
+          nativeRequest.current = request;
+          if (nativeAvailable) {
+            setNativePending(true);
+            setNativeCancelable(true);
+          }
+          void enable(request.controller.signal, () => {
+            request.committed = true;
+            setNativeCancelable(false);
+          })
+            .catch(() => {
+              if (!request.controller.signal.aborted) setStatus('unavailable');
+            })
+            .finally(() => {
+              if (request === nativeRequest.current) {
+                setNativePending(false);
+                setNativeCancelable(false);
+              }
+            });
+        }}
+        disabled={status === 'on' || nativePending}
+      >
+        {nativePending
+          ? nativeCancelable
+            ? 'Waiting for Mac permission…'
+            : 'Finishing Mac notification setup…'
+          : status === 'on'
+            ? nativeAvailable
+              ? 'Mac notifications enabled'
+              : 'Push enabled'
+            : status === 'unavailable'
+              ? nativeAvailable
+                ? 'Mac notifications unavailable'
+                : 'Push unavailable'
+              : nativeAvailable
+                ? 'Enable Mac notifications'
+                : 'Enable push'}
+      </button>
+      {nativePending && nativeCancelable && (
+        <button
+          type="button"
+          onClick={() => {
+            const request = nativeRequest.current;
+            if (!request || request.committed) return;
+            request.controller.abort();
+            nativeRequest.current = undefined;
+            setNativeCancelable(false);
+            void cancelNativeAuthorization()
+              .then(() => setStatus('off'))
+              .catch(() => setStatus('unavailable'))
+              .finally(() => setNativePending(false));
+          }}
+        >
+          Cancel notification request
+        </button>
+      )}
+    </>
   );
 }
 

@@ -63,6 +63,11 @@ import sharp from 'sharp';
 import { Type } from 'typebox';
 import { classifyDashboardError } from './application/error-classification.js';
 import type { SessionFeedRegistry, ShellFeed } from './live-feeds.js';
+import {
+  NATIVE_ENDPOINT,
+  NATIVE_ORIGIN,
+  type NativeNotifications,
+} from './native-notifications.js';
 import type { PushForegroundReport } from './push.js';
 import { allowedOrigin, authorizeRequest } from './security.js';
 import type { DashboardTelemetry } from './telemetry.js';
@@ -235,6 +240,8 @@ export interface DashboardRouteContext {
   markNotificationRead(id: string): void;
   markAllNotificationsRead(): void;
   pushSubscribe(body: unknown): void;
+  nativeNotifications?(): NativeNotifications | undefined;
+  removePushSubscription?(endpoint: string): void;
   reportPushForeground?(report: PushForegroundReport): void;
   vapidPublicKey(): string | null;
   /** Reject mutating requests once daemon teardown has begun. */
@@ -497,6 +504,8 @@ export const dashboardRoutes: FastifyPluginAsync<{
   installCorsAndAuth(app, context);
   registerDashboardTrpc(app, {
     telemetry: context.telemetry,
+    nativeNotifications: context.nativeNotifications,
+    removePushSubscription: context.removePushSubscription,
     serverId: context.serverId,
     snapshot: context.snapshot,
     composerCommands: context.composerCommands,
@@ -1394,6 +1403,13 @@ export const dashboardRoutes: FastifyPluginAsync<{
       },
     },
     async (request, reply) => {
+      if (
+        (request.body as PushForegroundReport).endpoint === NATIVE_ENDPOINT &&
+        request.headers.origin !== NATIVE_ORIGIN
+      )
+        return reply
+          .code(403)
+          .send({ error: 'Native foreground requires the local origin.' });
       context.reportPushForeground?.(request.body as PushForegroundReport);
       return reply.code(204).send();
     },

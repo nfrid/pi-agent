@@ -40,7 +40,13 @@ describe('NotificationService runtime shutdowns', () => {
     const addNotification = vi.fn();
     const notify = vi.fn(async () => undefined);
     const service = new NotificationService(
-      { addNotification } as unknown as MetadataStore,
+      {
+        addNotification,
+        orchestration: {
+          getSessionThreadLink: () => undefined,
+          getProject: () => undefined,
+        },
+      } as unknown as MetadataStore,
       { notify } as unknown as PushSender,
     );
 
@@ -61,7 +67,13 @@ describe('NotificationService runtime shutdowns', () => {
     const addNotification = vi.fn();
     const notify = vi.fn(async () => undefined);
     const service = new NotificationService(
-      { addNotification } as unknown as MetadataStore,
+      {
+        addNotification,
+        orchestration: {
+          getSessionThreadLink: () => undefined,
+          getProject: () => undefined,
+        },
+      } as unknown as MetadataStore,
       { notify } as unknown as PushSender,
     );
 
@@ -90,7 +102,13 @@ describe('NotificationService runtime shutdowns', () => {
     const addNotification = vi.fn();
     const notify = vi.fn(async () => undefined);
     const service = new NotificationService(
-      { addNotification } as unknown as MetadataStore,
+      {
+        addNotification,
+        orchestration: {
+          getSessionThreadLink: () => undefined,
+          getProject: () => undefined,
+        },
+      } as unknown as MetadataStore,
       { notify } as unknown as PushSender,
     );
 
@@ -118,7 +136,13 @@ describe('NotificationService runtime shutdowns', () => {
     const addNotification = vi.fn();
     const notify = vi.fn(async () => undefined);
     const service = new NotificationService(
-      { addNotification } as unknown as MetadataStore,
+      {
+        addNotification,
+        orchestration: {
+          getSessionThreadLink: () => undefined,
+          getProject: () => undefined,
+        },
+      } as unknown as MetadataStore,
       { notify } as unknown as PushSender,
     );
 
@@ -197,7 +221,7 @@ describe('NotificationService settled turns', () => {
 
   it('uses project and thread names with only the completed final answer', () => {
     vi.stubEnv('PI_DASHBOARD_NOTIFY_SETTLED', '1');
-    const { service, addNotification } = serviceWithProjectAndThread();
+    const { service, addNotification, notify } = serviceWithProjectAndThread();
     service.handle(
       settledChange(
         [
@@ -242,6 +266,14 @@ describe('NotificationService settled turns', () => {
         runtimeId: snapshot.runtimeId,
         sessionId: snapshot.session.id,
       }),
+    );
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({ body: 'Final answer' }),
+      {
+        project: 'Project display',
+        thread: 'Thread display',
+        url: `/sessions/${encodeURIComponent(snapshot.session.id)}`,
+      },
     );
   });
 
@@ -495,7 +527,13 @@ const answer = 42 &amp; true;
     const addNotification = vi.fn();
     const notify = vi.fn(async () => undefined);
     const service = new NotificationService(
-      { addNotification } as unknown as MetadataStore,
+      {
+        addNotification,
+        orchestration: {
+          getSessionThreadLink: () => undefined,
+          getProject: () => undefined,
+        },
+      } as unknown as MetadataStore,
       { notify } as unknown as PushSender,
       () => true,
     );

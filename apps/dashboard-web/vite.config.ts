@@ -12,9 +12,8 @@ type ProxyRequestHeaders = {
 };
 
 type ProxiedBrowserRequest = {
-  headers: {
-    origin?: string;
-  };
+  headers: { origin?: string };
+  url?: string;
 };
 
 type ViteProxyServer = {
@@ -30,7 +29,8 @@ type ViteProxyServer = {
 // Vite may bind the next free port when 4174 is already taken. Browser POSTs
 // still send that fallback Origin, which the API rejects unless it is listed
 // in PI_DASHBOARD_ORIGINS. Rewrite loopback origins to the API's own origin,
-// which the daemon always allow-lists after listen.
+// which the daemon always allow-lists after listen. Native routes retain only
+// the exact installed-PWA Origin because the API checks it per procedure.
 export function rewriteDashboardProxyOrigin(
   proxyReq: ProxyRequestHeaders,
   request: ProxiedBrowserRequest,
@@ -38,6 +38,8 @@ export function rewriteDashboardProxyOrigin(
 ): void {
   const origin = request.headers.origin;
   if (!origin) return;
+  if (origin === 'http://127.0.0.1:4174' && isNativeRequest(request.url))
+    return;
   let hostname: string;
   try {
     hostname = new URL(origin).hostname;
@@ -46,6 +48,20 @@ export function rewriteDashboardProxyOrigin(
   }
   if (hostname !== '127.0.0.1' && hostname !== 'localhost') return;
   proxyReq.setHeader('origin', target);
+}
+
+function isNativeRequest(requestUrl: string | undefined): boolean {
+  if (!requestUrl) return false;
+  const path = requestUrl.split('?', 1)[0] ?? '';
+  if (path === '/api/push/foreground') return true;
+  if (!path.startsWith('/trpc/')) return false;
+  try {
+    return decodeURIComponent(path.slice('/trpc/'.length))
+      .split(',')
+      .some((name) => name === 'nativeControl' || name === 'nativeClicks');
+  } catch {
+    return false;
+  }
 }
 
 function attachDashboardProxyOriginRewrite(proxy: ViteProxyServer): void {

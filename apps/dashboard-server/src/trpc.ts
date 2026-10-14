@@ -58,6 +58,10 @@ import { FileReadError } from './file-read.js';
 import { FeedOverflowError, FeedPayloadTooLargeError } from './live-feed.js';
 import type { SessionFeedRegistry, ShellFeed } from './live-feeds.js';
 import {
+  type NativeNotifications,
+  nativeClickPath,
+} from './native-notifications.js';
+import {
   type DashboardTelemetry,
   parseBrowserTelemetryInput,
 } from './telemetry.js';
@@ -74,7 +78,23 @@ export const DASHBOARD_FEED_INACTIVITY_RECONNECT_MS = 5 * 60_000;
  * generation ownership in DashboardServerImpl; this module never creates an
  * ID or caches a snapshot.
  */
+export function nativeOriginAllowed(
+  origin: string | undefined,
+  referer: string | undefined,
+): boolean {
+  if (origin === 'http://127.0.0.1:4174') return true;
+  if (origin) return false;
+  try {
+    return new URL(referer ?? '').origin === 'http://127.0.0.1:4174';
+  } catch {
+    return false;
+  }
+}
+
 export interface DashboardTrpcContext {
+  readonly nativeOriginAllowed?: boolean;
+  nativeNotifications?(): NativeNotifications | undefined;
+  removePushSubscription?(endpoint: string): void;
   readonly telemetry?: DashboardTelemetry;
   readonly serverId: () => string;
   readonly snapshot: () => BrowserSnapshot;
@@ -268,6 +288,14 @@ const telemetryMiddleware = t.middleware(async ({ ctx, path, type, next }) => {
 const dashboardProcedure = t.procedure
   .use(telemetryMiddleware)
   .use(protocolMiddleware);
+const nativeProcedure = dashboardProcedure.use(({ ctx, next }) => {
+  if (!ctx.nativeOriginAllowed)
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'Native notifications require the installed local PWA origin.',
+    });
+  return next();
+});
 
 function waitForBackgroundPoll(signal: AbortSignal | undefined): Promise<void> {
   return new Promise((resolve) => {
@@ -301,6 +329,72 @@ function backgroundOffsetFromEventId(
 
 /** The module-level router keeps the exported client contract concrete. */
 const dashboardRouter = t.router({
+  nativeControl: nativeProcedure
+    .input((value: unknown) => {
+      const input = value as {
+        action?: unknown;
+        endpoint?: unknown;
+        id?: unknown;
+        url?: unknown;
+      } | null;
+      if (
+        !input ||
+        !['status', 'enable', 'disable', 'ack', 'click'].includes(
+          String(input.action),
+        ) ||
+        (input.endpoint !== undefined &&
+          (typeof input.endpoint !== 'string' ||
+            input.endpoint.length > 2048)) ||
+        (input.id !== undefined &&
+          (typeof input.id !== 'string' || input.id.length > 128)) ||
+        (input.url !== undefined &&
+          (typeof input.url !== 'string' || input.url.length > 2048)) ||
+        (input.action === 'click' &&
+          (typeof input.url !== 'string' || !nativeClickPath(input.url)))
+      )
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Invalid native notification control.',
+        });
+      return input as {
+        action: 'status' | 'enable' | 'disable' | 'ack' | 'click';
+        endpoint?: string;
+        id?: string;
+        url?: string;
+      };
+    })
+    .mutation(async ({ ctx, input }) => {
+      const native = ctx.nativeNotifications?.();
+      if (!native)
+        return { available: false, enabled: false, permission: 'unavailable' };
+      if (input.action === 'ack') {
+        if (input.id) native.acknowledge(input.id);
+        return {
+          available: true,
+          enabled: native.isEnabled(),
+          permission: 'unknown',
+        };
+      }
+      const endpoint = input.endpoint;
+      return native.control(
+        input.action,
+        input.url,
+        input.action === 'enable' && endpoint
+          ? () => ctx.removePushSubscription?.(endpoint)
+          : undefined,
+      );
+    }),
+  nativeClicks: nativeProcedure.subscription(async function* ({ ctx, signal }) {
+    let previous: string | undefined;
+    while (!signal?.aborted) {
+      const click = ctx.nativeNotifications?.()?.click();
+      if (click && click.id !== previous) {
+        previous = click.id;
+        yield { id: click.id, path: click.path };
+      }
+      await waitForBackgroundPoll(signal);
+    }
+  }),
   protocolInfo: t.procedure
     .output((value: unknown) =>
       parseSchema(ProtocolInfoSchema, value, 'protocol info output'),
@@ -728,6 +822,10 @@ export function registerDashboardTrpc(
         path: request.params.path,
         createContext: () => ({
           ...context,
+          nativeOriginAllowed: nativeOriginAllowed(
+            request.headers.origin,
+            request.headers.referer,
+          ),
           lastEventId:
             typeof request.headers['last-event-id'] === 'string'
               ? request.headers['last-event-id']

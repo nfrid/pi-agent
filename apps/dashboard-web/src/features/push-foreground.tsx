@@ -1,6 +1,8 @@
 import { dashboardHttpClient } from '@pi-dashboard/client';
 import { useEffect, useRef, useState } from 'react';
 
+import { nativeEndpoint, nativeStatus } from './native-notifications';
+
 const REFRESH_MS = 10_000;
 
 function routeTarget(pathname: string): {
@@ -48,17 +50,22 @@ export function PushForegroundPresence({ pathname }: { pathname: string }) {
     };
     const discoverSubscription = () => {
       if (
-        endpoint ||
+        endpoint === nativeEndpoint ||
         discovery ||
         disposed ||
         (!target.sessionId && !target.runtimeId)
       )
         return;
-      discovery = navigator.serviceWorker?.ready
-        .then((registration) => registration.pushManager.getSubscription())
-        .then((subscription) => {
-          if (!disposed && subscription) {
-            endpoint = subscription.endpoint;
+      discovery = nativeStatus()
+        .then(async (native) => {
+          if (native.enabled) return nativeEndpoint;
+          const registration = await navigator.serviceWorker?.ready;
+          return (await registration?.pushManager.getSubscription())?.endpoint;
+        })
+        .then((discovered) => {
+          if (!disposed && discovered && discovered !== endpoint) {
+            clear();
+            endpoint = discovered;
             update();
           }
         })
@@ -69,10 +76,8 @@ export function PushForegroundPresence({ pathname }: { pathname: string }) {
     };
     const update = () => {
       if (disposed) return;
-      if (!endpoint) {
-        discoverSubscription();
-        return;
-      }
+      discoverSubscription();
+      if (!endpoint) return;
       const active =
         document.visibilityState === 'visible' &&
         document.hasFocus() &&
@@ -104,6 +109,12 @@ export function PushForegroundPresence({ pathname }: { pathname: string }) {
     const onBlur = () => clear();
     const onFocus = () => update();
     const onPageHide = () => clear(true);
+    const onNativeEnabled = () => {
+      clear();
+      endpoint = nativeEndpoint;
+      update();
+    };
+    window.addEventListener('native-notifications-enabled', onNativeEnabled);
 
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('blur', onBlur);
@@ -121,6 +132,10 @@ export function PushForegroundPresence({ pathname }: { pathname: string }) {
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('pageshow', onFocus);
       window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener(
+        'native-notifications-enabled',
+        onNativeEnabled,
+      );
       clear(true);
     };
   }, [currentTabId, pathname]);

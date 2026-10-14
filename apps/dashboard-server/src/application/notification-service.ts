@@ -8,7 +8,7 @@ import { decodeHTML } from 'entities';
 import { parseDocument } from 'htmlparser2';
 import { marked, type Tokens, type TokensList } from 'marked';
 import type { MetadataStore } from '../metadata.js';
-import type { PushSender } from '../push.js';
+import { notificationUrl, type PushSender } from '../push.js';
 import type { RegistryChange } from '../runtime-registry.js';
 
 function isTranscriptEvent(change: RegistryChange): boolean {
@@ -173,10 +173,10 @@ function nonBlank(value: string | undefined): string | undefined {
   return trimmed || undefined;
 }
 
-function settledNotificationTitle(
+function notificationNames(
   metadata: MetadataStore,
   snapshot: Extract<RegistryChange, { kind: 'event' }>['snapshot'],
-): string {
+): { project: string; thread: string; title: string } {
   const link = metadata.orchestration.getSessionThreadLink(snapshot.session.id);
   const thread = link
     ? metadata.orchestration.getThread(link.threadId)
@@ -189,14 +189,27 @@ function settledNotificationTitle(
     nonBlank(snapshot.session.name) ??
     nonBlank(snapshot.session.title);
   const projectName = nonBlank(project?.title);
-  if (!displayName && !projectName) return 'Pi finished a turn';
-  if (!displayName) return projectName?.slice(0, 512) ?? 'Pi finished a turn';
-  if (!projectName) return displayName.slice(0, 512);
-
+  const names = {
+    project: projectName?.slice(0, 512) ?? 'Pi',
+    thread: displayName?.slice(0, 512) ?? 'Thread',
+  };
+  if (!displayName && !projectName)
+    return { ...names, title: 'Pi finished a turn' };
+  if (!displayName)
+    return {
+      ...names,
+      title: projectName?.slice(0, 512) ?? 'Pi finished a turn',
+    };
+  if (!projectName) return { ...names, title: displayName.slice(0, 512) };
   const separator = ' · ';
   const projectLimit = Math.max(0, 512 - separator.length - displayName.length);
-  if (projectLimit === 0) return displayName.slice(0, 512);
-  return `${projectName.slice(0, projectLimit).trimEnd()}${separator}${displayName}`;
+  return {
+    ...names,
+    title:
+      projectLimit === 0
+        ? displayName.slice(0, 512)
+        : `${projectName.slice(0, projectLimit).trimEnd()}${separator}${displayName}`,
+  };
 }
 
 /** Derives durable/in-app notifications from runtime changes. */
@@ -219,23 +232,27 @@ export class NotificationService {
 
   handle(change: RegistryChange, projection?: TranscriptProjection): void {
     if (change.kind === 'offline') {
+      const names = notificationNames(this.metadata, change.snapshot);
       const kind =
         change.snapshot.liveState === 'failed' ? 'failed' : 'runtime-exited';
-      this.publish({
-        id: `${kind}-${change.snapshot.runtimeId}-${change.snapshot.lastSeenAt ?? Date.now()}`,
-        kind,
-        runtimeId: change.snapshot.runtimeId,
-        sessionId: change.snapshot.session.id,
-        title:
-          kind === 'failed'
-            ? 'Pi runtime failed'
-            : 'Pi runtime disconnected unexpectedly',
-        body:
-          change.snapshot.lastError ??
-          change.snapshot.session.name ??
-          change.snapshot.cwd,
-        createdAt: Date.now(),
-      });
+      this.publish(
+        {
+          id: `${kind}-${change.snapshot.runtimeId}-${change.snapshot.lastSeenAt ?? Date.now()}`,
+          kind,
+          runtimeId: change.snapshot.runtimeId,
+          sessionId: change.snapshot.session.id,
+          title:
+            kind === 'failed'
+              ? 'Pi runtime failed'
+              : 'Pi runtime disconnected unexpectedly',
+          body:
+            change.snapshot.lastError ??
+            change.snapshot.session.name ??
+            change.snapshot.cwd,
+          createdAt: Date.now(),
+        },
+        names,
+      );
     }
     if (change.kind !== 'event') return;
     const event = change.event;
@@ -252,29 +269,40 @@ export class NotificationService {
       this.isDelegateSession(change.snapshot)
     )
       return;
-    this.publish({
-      id: `${failedGoodbye ? 'failed' : event.type}-${change.snapshot.runtimeId}-${Date.now()}`,
-      kind: failedGoodbye ? 'failed' : 'settled',
-      runtimeId: change.snapshot.runtimeId,
-      sessionId: change.snapshot.session.id,
-      title: failedGoodbye
-        ? 'Pi runtime failed'
-        : settledNotificationTitle(this.metadata, change.snapshot),
-      body: failedGoodbye
-        ? (change.snapshot.lastError ??
-          change.snapshot.session.name ??
-          change.snapshot.cwd)
-        : finalAssistantText(change, projection) || 'Turn completed.',
-      createdAt: Date.now(),
-    });
+    const names = notificationNames(this.metadata, change.snapshot);
+    this.publish(
+      {
+        id: `${failedGoodbye ? 'failed' : event.type}-${change.snapshot.runtimeId}-${Date.now()}`,
+        kind: failedGoodbye ? 'failed' : 'settled',
+        runtimeId: change.snapshot.runtimeId,
+        sessionId: change.snapshot.session.id,
+        title: failedGoodbye ? 'Pi runtime failed' : names.title,
+        body: failedGoodbye
+          ? (change.snapshot.lastError ??
+            change.snapshot.session.name ??
+            change.snapshot.cwd)
+          : finalAssistantText(change, projection) || 'Turn completed.',
+        createdAt: Date.now(),
+      },
+      names,
+    );
   }
 
   close(): void {
     this.push.close?.();
   }
 
-  private publish(notification: NotificationEvent): void {
+  private publish(
+    notification: NotificationEvent,
+    names: { project: string; thread: string },
+  ): void {
     this.metadata.addNotification(notification);
-    void this.push.notify(notification).catch(() => undefined);
+    void this.push
+      .notify(notification, {
+        project: names.project,
+        thread: names.thread,
+        url: notificationUrl(notification, 'native'),
+      })
+      .catch(() => undefined);
   }
 }

@@ -1,9 +1,63 @@
+import { once } from 'node:events';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { connect } from 'node:net';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('node:fs', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...original,
+    existsSync: (value: import('node:fs').PathLike) =>
+      String(value).endsWith(
+        'Pi Dashboard Notifications.app/Contents/MacOS/PiNotifications',
+      ) || original.existsSync(value),
+  };
+});
+
 import {
   createPushSender,
   notificationTopic,
+  notificationUrl,
   PushForegroundClients,
 } from './push.js';
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:child_process')>();
+  const { EventEmitter } = await import('node:events');
+  return {
+    ...original,
+    spawn: () => {
+      const child = Object.assign(new EventEmitter(), { kill: () => true });
+      queueMicrotask(() =>
+        child.emit('error', new Error('Test helper unavailable')),
+      );
+      return child;
+    },
+  };
+});
+
+it('keeps Web home fallback and uses supported native fault/session/runtime routes', () => {
+  const event = {
+    id: 'fault',
+    kind: 'failed' as const,
+    title: 'Failure',
+    body: 'Detail',
+    createdAt: 1,
+  };
+  expect(notificationUrl(event)).toBe('/');
+  expect(notificationUrl(event, 'native')).toBe('/');
+  expect(
+    notificationUrl({ ...event, runtimeId: 'runtime/one' }, 'native'),
+  ).toBe('/runtimes/runtime%2Fone');
+  expect(
+    notificationUrl(
+      { ...event, sessionId: 'thread/one', runtimeId: 'runtime/one' },
+      'native',
+    ),
+  ).toBe('/sessions/thread%2Fone');
+});
 
 const webPush = vi.hoisted(() => ({
   setVapidDetails: vi.fn(),
@@ -12,6 +66,35 @@ const webPush = vi.hoisted(() => ({
 vi.mock('web-push', () => ({ default: webPush }));
 
 describe('push foreground clients', () => {
+  it('transfers the enabling Mac leases to native without extending expiry or changing phone presence', () => {
+    let now = 0;
+    const clients = new PushForegroundClients(() => now);
+    for (const endpoint of ['mac', 'phone'])
+      clients.update({
+        endpoint,
+        tabId: endpoint,
+        visible: true,
+        focused: true,
+        sessionId: endpoint,
+      });
+    now = 10000;
+    clients.transferEndpoint('mac', 'native:installed-pwa');
+    const event = {
+      id: 'done',
+      kind: 'settled' as const,
+      title: 'Done',
+      body: '',
+      createdAt: 0,
+      sessionId: 'mac',
+    };
+    expect(clients.matches('mac', event)).toBe(false);
+    expect(clients.matches('native:installed-pwa', event)).toBe(true);
+    expect(clients.matches('phone', { ...event, sessionId: 'phone' })).toBe(
+      true,
+    );
+    now = 30000;
+    expect(clients.matches('native:installed-pwa', event)).toBe(false);
+  });
   it('matches settled events within one subscription across active tabs', () => {
     const clients = new PushForegroundClients(() => 100);
     const report = (endpoint: string, tabId: string, sessionId: string) =>
@@ -180,6 +263,142 @@ describe('push sender foreground filtering', () => {
       vi.unstubAllEnvs();
     }
   });
+});
+
+it.skipIf(process.platform !== 'darwin')(
+  'delivers native and phone independently, without recreating the removed Mac Web subscription',
+  async () => {
+    vi.stubEnv('PI_DASHBOARD_VAPID_PUBLIC_KEY', 'public-key');
+    vi.stubEnv('PI_DASHBOARD_VAPID_PRIVATE_KEY', 'private-key');
+    const directory = await mkdtemp(path.join(tmpdir(), 'pi-native-push-'));
+    const socketPath = path.join(directory, 'control.sock');
+    const subscriptions = [
+      { endpoint: 'phone', subscription: { endpoint: 'phone' } },
+    ];
+    const sender = await createPushSender(
+      { pushSubscriptions: () => subscriptions } as never,
+      socketPath,
+    );
+    const socket = connect(socketPath);
+    const received: Record<string, unknown>[] = [];
+    try {
+      await once(socket, 'connect');
+      let buffer = '';
+      socket.setEncoding('utf8');
+      socket.on('data', (chunk) => {
+        buffer += chunk;
+        while (true) {
+          const end = buffer.indexOf('\n');
+          if (end < 0) break;
+          const message = JSON.parse(buffer.slice(0, end));
+          buffer = buffer.slice(end + 1);
+          received.push(message);
+          if (message.type === 'authorize')
+            socket.write(
+              `${JSON.stringify({ type: 'status', id: message.id, permission: 'authorized' })}\n`,
+            );
+        }
+      });
+      await sender.native?.control('enable');
+      const event = {
+        id: 'done',
+        kind: 'settled' as const,
+        sessionId: 'thread',
+        title: 'Browser title',
+        body: 'Plain text',
+        createdAt: 1,
+      };
+      const presentation = {
+        project: 'Project',
+        thread: 'Thread',
+        url: '/sessions/thread',
+      };
+      webPush.sendNotification.mockClear();
+      await sender.notify(event, presentation);
+      await vi.waitFor(() =>
+        expect(
+          received.filter((message) => message.type === 'notify'),
+        ).toHaveLength(1),
+      );
+      expect(
+        webPush.sendNotification.mock.calls.map(
+          ([subscription]) => subscription,
+        ),
+      ).toEqual([{ endpoint: 'phone' }]);
+      sender.reportForeground?.({
+        endpoint: 'native:installed-pwa',
+        tabId: 'pwa',
+        visible: true,
+        focused: true,
+        sessionId: 'thread',
+      });
+      await sender.notify(event, presentation);
+      expect(webPush.sendNotification).toHaveBeenCalledTimes(2);
+      expect(
+        received.filter((message) => message.type === 'notify'),
+      ).toHaveLength(1);
+      socket.destroy();
+      await vi.waitFor(() => expect(sender.native?.isEnabled()).toBe(false));
+      await sender.notify(event, presentation);
+      expect(webPush.sendNotification).toHaveBeenCalledTimes(3);
+      expect(subscriptions.map((value) => value.endpoint)).toEqual(['phone']);
+    } finally {
+      socket.destroy();
+      sender.close?.();
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+it('rolls back only the current Mac subscription if native handoff fails partway through removal', async () => {
+  const subscriptions = new Map<
+    string,
+    {
+      endpoint: string;
+      subscription: unknown;
+      createdAt: number;
+      updatedAt: number;
+    }
+  >([
+    [
+      'mac',
+      {
+        endpoint: 'mac',
+        subscription: { endpoint: 'mac' },
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ],
+    [
+      'phone',
+      {
+        endpoint: 'phone',
+        subscription: { endpoint: 'phone' },
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ],
+  ]);
+  const metadata = {
+    pushSubscriptions: () => [...subscriptions.values()],
+    removePushSubscription(endpoint: string) {
+      subscriptions.delete(endpoint);
+      throw new Error('remove failed');
+    },
+    savePushSubscription(value: {
+      endpoint: string;
+      subscription: unknown;
+      createdAt: number;
+      updatedAt: number;
+    }) {
+      subscriptions.set(value.endpoint, value);
+    },
+  };
+  const sender = await createPushSender(metadata as never);
+  expect(() => sender.replaceWithNative?.('mac')).toThrow('remove failed');
+  expect([...subscriptions.keys()]).toEqual(['phone', 'mac']);
+  sender.close?.();
 });
 
 describe('push topics', () => {

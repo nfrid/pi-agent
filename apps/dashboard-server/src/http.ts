@@ -634,6 +634,9 @@ export class DashboardServerImpl implements DashboardServer {
         this.changed();
       },
       pushSubscribe: (body) => this.savePushSubscription(body),
+      nativeNotifications: () => this.push.native,
+      removePushSubscription: (endpoint) =>
+        this.push.replaceWithNative?.(endpoint),
       reportPushForeground: (report) => this.push.reportForeground?.(report),
       vapidPublicKey: () => process.env.PI_DASHBOARD_VAPID_PUBLIC_KEY ?? null,
       assertMutationsOpen: () => this.assertMutationsOpen(),
@@ -908,7 +911,10 @@ export class DashboardServerImpl implements DashboardServer {
       this.application.initializeSessionMetadataBaseline();
       await this.application.orchestrationService?.start();
       if (!this.pushConfigured)
-        this.push = await createPushSender(this.metadata);
+        this.push = await createPushSender(
+          this.metadata,
+          path.join(this.stateDir, 'notifications', 'control.sock'),
+        );
       this.application.setPush(this.push);
       this.feedSweepTimer = setInterval(
         () => {

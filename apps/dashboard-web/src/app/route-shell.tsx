@@ -8,6 +8,7 @@ import {
 } from '../features/dashboard-surface-context';
 import { DraftPromotionLifecycle } from '../features/draft-promotion-lifecycle';
 import { FileViewerProvider } from '../features/file-viewer/context';
+import { NativeClickNavigation } from '../features/native-notifications';
 import { Header } from '../features/navigation';
 import { NewThreadProjectChooser } from '../features/new-thread-project-chooser';
 import { PushForegroundPresence } from '../features/push-foreground';
@@ -81,6 +82,7 @@ export function RouteShell() {
     <div className="app">
       <DraftPromotionLifecycle snapshot={dashboard.snapshot} />
       <PushForegroundPresence pathname={routeState.pathname} />
+      <NativeClickNavigation />
       <DashboardSurfaceProvider
         blocked={false}
         locationKey={routeState.pathname}
