@@ -89,6 +89,21 @@ function publicResult(value: ExternalDeliveryResult): ExternalDeliveryResult {
 function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
+function deliveryFingerprint(
+  projectId: string,
+  command: ExternalDeliveryCommand,
+): string {
+  const { isService, ...legacyCommand } = command;
+  return digest(
+    stable({
+      projectId,
+      command: {
+        ...legacyCommand,
+        ...(isService === true ? { isService: true } : {}),
+      },
+    }),
+  );
+}
 function conflict(id: string): Error & { code: string } {
   return Object.assign(
     new Error(`Delivery ${id} was submitted with a different payload.`),
@@ -526,7 +541,7 @@ export class ExternalDeliveryService {
     command = parseExternalDeliveryCommand(command);
     this.validate(command);
     const key = deliveryKey(projectId, command.deliveryId);
-    const fingerprint = digest(stable({ projectId, command }));
+    const fingerprint = deliveryFingerprint(projectId, command);
     const current = this.tasks.get(key);
     if (current) {
       if (current.fingerprint !== fingerprint)
@@ -677,7 +692,7 @@ export class ExternalDeliveryService {
     const project = this.repository.getProject(projectId);
     if (project?.status !== 'active')
       throw new Error('Project not found or archived.');
-    const hash = digest(stable({ projectId, command }));
+    const hash = deliveryFingerprint(projectId, command);
     const namespacedRef = command.conversationRef
       ? externalConversationRef(projectId, command.conversationRef)
       : undefined;
@@ -900,6 +915,9 @@ export class ExternalDeliveryService {
               command.model ??
               this.defaultModel?.(projectId) ??
               project.defaultModel,
+            ...(command.isService === undefined
+              ? {}
+              : { isService: command.isService }),
           },
           prepared.images,
           correlationId,

@@ -209,6 +209,8 @@ export const ExternalDeliveryCommandSchema = Type.Object(
       }),
     ),
     text: Type.String({ maxLength: MAX_TEXT }),
+    /** Classify only a newly created external conversation as service-owned. */
+    isService: Type.Optional(Type.Boolean()),
     attachments: Type.Optional(
       Type.Array(ExternalDeliveryAttachmentSchema, {
         maxItems: MAX_EXTERNAL_DELIVERY_ATTACHMENTS,

@@ -154,6 +154,8 @@ export const parseExternalDeliveryCommand = (
     throw new Error('A source-session fence requires an explicit thread.');
   if (command.coalesceConversation && !command.expectedSessionId)
     throw new Error('Conversation coalescing requires a source-session fence.');
+  if (command.isService === true && command.conversationRef === undefined)
+    throw new Error('Service classification requires a conversationRef.');
   if (
     (command.mode === 'steer' || command.mode === 'reply') &&
     (!command.threadId || !command.expectedSessionId)

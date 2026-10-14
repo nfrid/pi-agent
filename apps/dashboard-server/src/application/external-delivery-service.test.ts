@@ -1561,6 +1561,73 @@ describe('external delivery with SQLite and persisted Pi branches', () => {
     });
   });
 
+  it('persists service classification only on new conversations and fingerprints it', async () => {
+    const f = await fixture();
+    f.repository.transitionRun('run', 'completed');
+    const command = {
+      deliveryId: 'service-new',
+      conversationRef: 'service-chat',
+      text: 'First turn',
+      isService: true,
+    };
+    const first = await f.service.submit('p', command);
+    expect(f.repository.getThread(first.threadId as string)?.isService).toBe(
+      true,
+    );
+    await f.reopen();
+    expect(await f.service.submit('p', command)).toEqual(first);
+    await expect(
+      f.service.submit('p', { ...command, isService: false }),
+    ).rejects.toMatchObject({ code: 'idempotency-conflict' });
+
+    const existing = await fixture('existing-chat');
+    await existing.service.submit('p', {
+      deliveryId: 'matched-service-marker',
+      conversationRef: 'existing-chat',
+      text: 'Existing conversation',
+      isService: true,
+    });
+    expect(existing.repository.getThread('thread')?.isService).toBeUndefined();
+    await existing.finish();
+    await existing.service.get('p', 'matched-service-marker');
+    existing.live.liveState = 'waiting';
+    await existing.service.submit('p', {
+      deliveryId: 'source-reply',
+      threadId: 'thread',
+      expectedSessionId: 'session',
+      mode: 'reply',
+      coalesceConversation: true,
+      text: 'Reply stays a normal thread delivery',
+    });
+    expect(existing.repository.getThread('thread')?.isService).toBeUndefined();
+    expect(existing.send.mock.calls.at(-1)?.[1].text).toContain(
+      'Reply stays a normal thread delivery',
+    );
+  });
+
+  it('keeps omitted and false service markers on the legacy fingerprint', async () => {
+    const f = await fixture();
+    const legacy = {
+      deliveryId: 'legacy-classification',
+      threadId: 'thread',
+      text: 'да',
+    };
+    await f.service.submit('p', { ...legacy, isService: false });
+    const expected = createHash('sha256')
+      .update(
+        '{"command":{"deliveryId":"legacy-classification","text":"да","threadId":"thread"},"projectId":"p"}',
+      )
+      .digest('hex');
+    expect(
+      f.repository.getCommandIntent(f.intentKey(legacy.deliveryId))
+        ?.commandFingerprint,
+    ).toBe(expected);
+    await f.reopen();
+    await expect(f.service.submit('p', legacy)).resolves.toMatchObject({
+      deliveryId: legacy.deliveryId,
+    });
+  });
+
   it('creates one first-turn prompt and never replays an ambiguous first hello after reopen', async () => {
     for (const fail of [false, true]) {
       const f = await fixture();

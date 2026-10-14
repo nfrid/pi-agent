@@ -127,6 +127,33 @@ it('requires an explicit thread and structured bridge input for a source-session
 });
 
 describe('external delivery contract', () => {
+  it('accepts service classification only for conversation deliveries', () => {
+    expect(
+      parseExternalDeliveryCommand({
+        deliveryId: 'service-delivery',
+        conversationRef: 'telegram-chat-1',
+        text: 'Inspect this.',
+        isService: true,
+      }),
+    ).toMatchObject({ isService: true });
+    expect(() =>
+      parseExternalDeliveryCommand({
+        deliveryId: 'source-service-delivery',
+        threadId: 'thread-1',
+        text: 'Inspect this.',
+        isService: true,
+      }),
+    ).toThrow();
+    const legacy = {
+      deliveryId: 'legacy-delivery',
+      conversationRef: 'telegram-chat-1',
+      text: 'Inspect this.',
+    };
+    expect(
+      parseExternalDeliveryCommand({ ...legacy, isService: false }),
+    ).toMatchObject({ ...legacy, isService: false });
+  });
+
   it('accepts a conversation delivery and bounded attachment metadata', () => {
     expect(
       parseExternalDeliveryCommand({
