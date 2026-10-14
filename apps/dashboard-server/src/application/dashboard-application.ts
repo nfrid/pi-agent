@@ -864,6 +864,11 @@ export class DashboardApplication {
     this.notifications = new NotificationService(
       options.metadata,
       options.push,
+      (runtime) =>
+        (
+          this.sessionIndex.get(runtime.session.id) ??
+          this.unindexedDelegateSession(runtime)
+        )?.sessionKind === 'delegate',
     );
     this.usage = new UsageService(options.usage, options.onChange, {
       history: options.metadata.usageHistory,

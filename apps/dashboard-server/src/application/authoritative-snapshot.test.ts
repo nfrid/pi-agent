@@ -18,6 +18,7 @@ interface Fixture {
   app: DashboardApplication;
   metadata: MetadataStore;
   sessions: SessionIndex;
+  pushNotify: ReturnType<typeof vi.fn>;
   close(): Promise<void>;
   register(
     runtime: RuntimeSnapshot,
@@ -87,13 +88,14 @@ async function fixture(
     transportProvenance: (runtimeId: string) => provenance.get(runtimeId),
     close: () => undefined,
   } as unknown as RuntimeRegistry;
+  const pushNotify = vi.fn(async () => undefined);
   const app = new DashboardApplication({
     registry,
     manager: { onRegistryChange: () => undefined } as never,
     sessions,
     metadata,
     usage: { get: async () => null },
-    push: { notify: async () => undefined },
+    push: { notify: pushNotify },
     stateDir: path.join(root, 'state'),
     ...(projectAssociation
       ? {
@@ -113,6 +115,7 @@ async function fixture(
     app,
     metadata,
     sessions,
+    pushNotify,
     async close() {
       await app.usage.stop();
       await app.uploads.close();
@@ -208,6 +211,84 @@ function activeTranscriptState(
 }
 
 describe('authoritative application snapshot lifecycle', () => {
+  it('suppresses settled notifications for indexed and unindexed delegates', async () => {
+    vi.stubEnv('PI_DASHBOARD_NOTIFY_SETTLED', '1');
+    const indexed = await fixture('indexed-delegate', [
+      {
+        type: 'session',
+        id: 'indexed-delegate',
+        cwd: '/tmp/snapshot',
+        sessionKind: 'delegate',
+        parentSessionId: 'parent-session',
+      },
+    ]);
+    const indexedRuntime = runtime(indexed.file, {
+      session: { id: 'indexed-delegate', file: indexed.file, entries: [] },
+    });
+    indexed.register(indexedRuntime);
+    indexed.event(indexedRuntime, {
+      type: 'agent.settled',
+      sessionId: 'indexed-delegate',
+    });
+    expect(indexed.metadata.unreadNotifications()).toEqual([]);
+    expect(indexed.pushNotify).not.toHaveBeenCalled();
+
+    const unindexed = await fixture(
+      'unindexed-delegate-fixture',
+      [{ type: 'session', id: 'unindexed-delegate-fixture', cwd: '/tmp' }],
+      undefined,
+      undefined,
+      true,
+    );
+    const delegateFile = path.join(
+      unindexed.root,
+      '.delegate-sessions',
+      'unindexed-delegate.jsonl',
+    );
+    await writeFile(
+      delegateFile,
+      `${JSON.stringify({
+        type: 'session',
+        id: 'unindexed-delegate',
+        cwd: '/tmp/snapshot',
+        sessionKind: 'delegate',
+        parentSessionId: 'parent-session',
+      })}\n`,
+    );
+    const delegateRuntime = runtime(delegateFile, {
+      session: { id: 'unindexed-delegate', file: delegateFile, entries: [] },
+    });
+    unindexed.register(delegateRuntime);
+    unindexed.event(delegateRuntime, {
+      type: 'agent.settled',
+      sessionId: 'unindexed-delegate',
+    });
+    expect(unindexed.metadata.unreadNotifications()).toEqual([]);
+    expect(unindexed.pushNotify).not.toHaveBeenCalled();
+  });
+
+  it('notifies ordinary sessions even when their cwd resembles a delegate path', async () => {
+    vi.stubEnv('PI_DASHBOARD_NOTIFY_SETTLED', '1');
+    const value = await fixture('ordinary-session');
+    const ordinary = runtime(value.file, {
+      cwd: '/tmp/.delegate-sessions/project',
+      session: {
+        id: 'ordinary-session',
+        file: value.file,
+        cwd: '/tmp/.delegate-sessions/project',
+        entries: [],
+      },
+    });
+    value.register(ordinary);
+    value.event(ordinary, {
+      type: 'agent.settled',
+      sessionId: 'ordinary-session',
+    });
+    expect(value.metadata.unreadNotifications()).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'settled' })]),
+    );
+  });
+
   it('notifies from the active transcript when settled snapshot entries are empty', async () => {
     vi.stubEnv('PI_DASHBOARD_NOTIFY_SETTLED', '1');
     const value = await fixture('live-notification-session');

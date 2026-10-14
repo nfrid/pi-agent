@@ -354,6 +354,175 @@ describe('NotificationService settled turns', () => {
     );
   });
 
+  it('renders Markdown as readable plain text before limiting the body', () => {
+    vi.stubEnv('PI_DASHBOARD_NOTIFY_SETTLED', '1');
+    const { service, addNotification } = serviceWithProjectAndThread();
+    service.handle(
+      settledChange(
+        [
+          {
+            id: 'assistant-final',
+            message: {
+              role: 'assistant',
+              content: [
+                {
+                  type: 'text',
+                  text: `**Bold _nested italic_** and [a link](https://example.test) \`x_y\`
+
+\\*literal\\* and user_name
+
+1. first
+2. second
+
+| left | right |
+| --- | --- |
+| alpha | beta |
+
+> quoted
+
+\`\`\`ts
+const answer = 42 &amp; true;
+\`\`\`
+
+![diagram](image.png) &amp; <b>safe</b>
+
+# Heading ~~gone~~`,
+                },
+              ],
+            },
+          },
+        ],
+        closure,
+      ),
+    );
+    expect(addNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: 'Bold nested italic and a link x_y *literal* and user_name 1. first 2. second left | right alpha | beta quoted const answer = 42 &amp; true; diagram & safe Heading gone',
+      }),
+    );
+  });
+
+  function expectRenderedBody(markdown: string, expected: string | RegExp) {
+    vi.stubEnv('PI_DASHBOARD_NOTIFY_SETTLED', '1');
+    const { service, addNotification } = serviceWithProjectAndThread();
+    service.handle(
+      settledChange(
+        [
+          {
+            id: 'assistant-final',
+            message: { role: 'assistant', content: markdown },
+          },
+        ],
+        closure,
+      ),
+    );
+    const body = addNotification.mock.calls[0]?.[0].body;
+    if (expected instanceof RegExp) expect(body).toMatch(expected);
+    else expect(body).toBe(expected);
+  }
+
+  it('keeps fenced code, following headings, and paragraphs separated', () => {
+    expectRenderedBody(
+      '```ts\nconst value = 1;\n```\n# Heading\nAfter the heading.',
+      'const value = 1; Heading After the heading.',
+    );
+  });
+
+  it('keeps list items separate from a following heading', () => {
+    expectRenderedBody('- first\n- second\n# Next', '• first • second Next');
+  });
+
+  it('preserves adjacency around inline HTML elements', () => {
+    expectRenderedBody('a<span>b</span>c', 'abc');
+    expectRenderedBody('<b>done</b>, next', 'done, next');
+  });
+
+  it('keeps HTML line breaks as text breaks', () => {
+    expectRenderedBody('a<br>b', 'a b');
+  });
+
+  it('parses HTML without losing quoted greater-than signs or comparisons', () => {
+    expectRenderedBody(
+      'Text <span data-value=">">visible</span><!-- hidden --> 1 < 2 and 4 > 3',
+      'Text visible 1 < 2 and 4 > 3',
+    );
+  });
+
+  it('decodes common named entities and safely handles out-of-range numeric entities', () => {
+    expectRenderedBody('&copy; &#99999999;', /©/);
+  });
+
+  it('uses the fallback when HTML stripping leaves no visible text', () => {
+    vi.stubEnv('PI_DASHBOARD_NOTIFY_SETTLED', '1');
+    const { service, addNotification } = serviceWithProjectAndThread();
+    service.handle(
+      settledChange(
+        [
+          {
+            id: 'assistant-final',
+            message: { role: 'assistant', content: '<!-- hidden -->' },
+          },
+        ],
+        closure,
+      ),
+    );
+    expect(addNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ body: 'Turn completed.' }),
+    );
+  });
+
+  it('applies the body limit after Markdown syntax is removed', () => {
+    vi.stubEnv('PI_DASHBOARD_NOTIFY_SETTLED', '1');
+    const { service, addNotification } = serviceWithProjectAndThread();
+    service.handle(
+      settledChange(
+        [
+          {
+            id: 'assistant-final',
+            message: { role: 'assistant', content: `**${'x'.repeat(300)}**` },
+          },
+        ],
+        closure,
+      ),
+    );
+    expect(addNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ body: 'x'.repeat(240) }),
+    );
+  });
+
+  it('suppresses settled notifications for classified delegates but keeps failures', () => {
+    vi.stubEnv('PI_DASHBOARD_NOTIFY_SETTLED', '1');
+    const addNotification = vi.fn();
+    const notify = vi.fn(async () => undefined);
+    const service = new NotificationService(
+      { addNotification } as unknown as MetadataStore,
+      { notify } as unknown as PushSender,
+      () => true,
+    );
+    service.handle(settledChange([], closure));
+    service.handle({
+      kind: 'offline',
+      snapshot: {
+        ...snapshot,
+        liveState: 'failed',
+        session: { ...snapshot.session, id: 'delegate-session' },
+      },
+    });
+    service.handle({
+      ...goodbye('error'),
+      snapshot: {
+        ...snapshot,
+        liveState: 'failed',
+        session: { ...snapshot.session, id: 'delegate-session' },
+      },
+    });
+    expect(addNotification).toHaveBeenCalledTimes(2);
+    expect(
+      addNotification.mock.calls.map(([notification]) => notification.kind),
+    ).toEqual(['failed', 'failed']);
+    expect(notify).toHaveBeenCalledTimes(2);
+  });
+
   it('does not notify when settled notifications are disabled', () => {
     vi.stubEnv('PI_DASHBOARD_NOTIFY_SETTLED', '0');
     const { service, addNotification, notify } = serviceWithProjectAndThread();

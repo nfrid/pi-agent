@@ -4,6 +4,9 @@ import {
   RESPONSE_CLOSURE_MARKER_TYPE,
   tryParseResponseClosure,
 } from '@pi-dashboard/protocol';
+import { decodeHTML } from 'entities';
+import { parseDocument } from 'htmlparser2';
+import { marked, type Tokens, type TokensList } from 'marked';
 import type { MetadataStore } from '../metadata.js';
 import type { PushSender } from '../push.js';
 import type { RegistryChange } from '../runtime-registry.js';
@@ -17,6 +20,83 @@ function isTranscriptEvent(change: RegistryChange): boolean {
 }
 
 const SETTLED_BODY_LIMIT = 240;
+
+type MarkdownToken = TokensList[number];
+
+type HtmlNode = ReturnType<typeof parseDocument>['children'][number];
+
+function htmlText(nodes: readonly HtmlNode[]): string {
+  return nodes
+    .map((node) => {
+      if (node.type === 'text') return node.data;
+      if (node.type === 'tag' && node.name === 'br') return '\n';
+      return 'children' in node ? htmlText(node.children) : '';
+    })
+    .join('');
+}
+
+function markdownTokensText(tokens: readonly MarkdownToken[]): string {
+  return tokens
+    .map((token) => {
+      const children =
+        'tokens' in token && token.tokens
+          ? markdownTokensText(token.tokens)
+          : '';
+      switch (token.type) {
+        case 'space':
+          return '\n';
+        case 'paragraph':
+        case 'heading':
+          return `${children}\n`;
+        case 'code':
+          return `${(token as Tokens.Code).text}\n`;
+        case 'codespan':
+          return (token as Tokens.Codespan).text;
+        case 'text':
+          return token.tokens ? children : decodeHTML(token.text);
+        case 'escape':
+          return decodeHTML(token.text);
+        case 'html': {
+          const html = token as Tokens.HTML;
+          const text = htmlText(parseDocument(html.text).children);
+          return html.block ? `${text}\n` : text;
+        }
+        case 'blockquote':
+          return `${children}\n`;
+        case 'list': {
+          const list = token as Tokens.List;
+          return `${list.items
+            .map(
+              (item, index) =>
+                `${list.ordered ? `${Number(list.start || 1) + index}. ` : '• '}${markdownTokensText(item.tokens)}`,
+            )
+            .join('\n')}\n`;
+        }
+        case 'list_item':
+          return children || (token as Tokens.ListItem).text;
+        case 'table': {
+          const table = token as Tokens.Table;
+          return `${[table.header, ...table.rows]
+            .map((row) =>
+              row.map((cell) => markdownTokensText(cell.tokens)).join(' | '),
+            )
+            .join('\n')}\n`;
+        }
+        case 'br':
+        case 'hr':
+          return '\n';
+        case 'image':
+          return children || (token as Tokens.Image).text;
+        default:
+          return children || ('text' in token ? decodeHTML(token.text) : '');
+      }
+    })
+    .join('');
+}
+
+function markdownPlainText(markdown: string): string {
+  return markdownTokensText(marked.lexer(markdown));
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -82,7 +162,10 @@ function finalAssistantText(
             )
             .join(' ')
         : '';
-  return text.replace(/\s+/g, ' ').trim().slice(0, SETTLED_BODY_LIMIT);
+  return markdownPlainText(text)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, SETTLED_BODY_LIMIT);
 }
 
 function nonBlank(value: string | undefined): string | undefined {
@@ -121,6 +204,9 @@ export class NotificationService {
   constructor(
     private readonly metadata: MetadataStore,
     private push: PushSender,
+    private readonly isDelegateSession: (
+      snapshot: Extract<RegistryChange, { kind: 'event' }>['snapshot'],
+    ) => boolean = () => false,
   ) {}
 
   setPush(push: PushSender): void {
@@ -161,6 +247,11 @@ export class NotificationService {
       (event.type === 'agent.settled' &&
         process.env.PI_DASHBOARD_NOTIFY_SETTLED === '1');
     if (!shouldNotify) return;
+    if (
+      event.type === 'agent.settled' &&
+      this.isDelegateSession(change.snapshot)
+    )
+      return;
     this.publish({
       id: `${failedGoodbye ? 'failed' : event.type}-${change.snapshot.runtimeId}-${Date.now()}`,
       kind: failedGoodbye ? 'failed' : 'settled',
