@@ -163,28 +163,17 @@ export class NotificationService {
     if (!shouldNotify) return;
     this.publish({
       id: `${failedGoodbye ? 'failed' : event.type}-${change.snapshot.runtimeId}-${Date.now()}`,
-      kind:
-        event.type === 'agent.settled'
-          ? 'settled'
-          : failedGoodbye
-            ? 'failed'
-            : 'runtime-exited',
+      kind: failedGoodbye ? 'failed' : 'settled',
       runtimeId: change.snapshot.runtimeId,
       sessionId: change.snapshot.session.id,
-      title:
-        event.type === 'agent.settled'
-          ? settledNotificationTitle(this.metadata, change.snapshot)
-          : failedGoodbye
-            ? 'Pi runtime failed'
-            : 'Pi runtime exited',
-      body:
-        event.type === 'agent.settled'
-          ? finalAssistantText(change, projection) || 'Turn completed.'
-          : failedGoodbye
-            ? (change.snapshot.lastError ??
-              change.snapshot.session.name ??
-              change.snapshot.cwd)
-            : (change.snapshot.session.name ?? change.snapshot.cwd),
+      title: failedGoodbye
+        ? 'Pi runtime failed'
+        : settledNotificationTitle(this.metadata, change.snapshot),
+      body: failedGoodbye
+        ? (change.snapshot.lastError ??
+          change.snapshot.session.name ??
+          change.snapshot.cwd)
+        : finalAssistantText(change, projection) || 'Turn completed.',
       createdAt: Date.now(),
     });
   }
