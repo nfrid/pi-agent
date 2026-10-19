@@ -57,9 +57,9 @@ reuses freed pages; its database page limit is 32 MiB, with a bounded temporary
 rollback journal during a write. Secure deletion clears deleted cells. Records
 expire on the next read or write, not from a separate daemon.
 
-Successful `http-200` records for `http..api.settings` and
-`http..api.sessions..id.delegate.history` share hourly buckets by operation,
-version and code. The stored occurrence count contributes fully to operation
+Successful `http-200` records for `http..api.settings`,
+`http..api.sessions..id.delegate.history` and `http..api.push.foreground` share
+hourly buckets keyed by operation, version and code. The stored occurrence count contributes fully to operation
 outcome totals. Bucket expiration uses its first observation timestamp, so the
 whole bucket expires together and retention may drop later observations by up to
 one hour. Other successes, all failures, expected outcomes and quirks remain

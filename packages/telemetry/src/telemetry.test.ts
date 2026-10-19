@@ -228,6 +228,10 @@ describe('local telemetry', () => {
     expect(record('http..api.settings', 'v2')).toBe(true);
     expect(record('http..api.settings', 'v1', 'http-201')).toBe(true);
     expect(record('http..api.sessions..id.delegate.history')).toBe(true);
+    expect(record('http..api.push.foreground')).toBe(true);
+    expect(record('http..api.push.foreground')).toBe(true);
+    expect(record('http..api.push.foreground', 'v2')).toBe(true);
+    expect(record('http..api.push.foreground', 'v1', 'http-201')).toBe(true);
     expect(record('http..api.other')).toBe(true);
     expect(
       store.record({
@@ -241,8 +245,8 @@ describe('local telemetry', () => {
     store.close();
     const reopened = new TelemetryStore(directory, () => now);
     stores.push(reopened);
-    expect(reopened.overview().eventCount).toBe(7);
-    expect(reopened.overview().observationCount).toBe(8);
+    expect(reopened.overview().eventCount).toBe(10);
+    expect(reopened.overview().observationCount).toBe(12);
     const inspect = new DatabaseSync(join(directory, 'events.sqlite'));
     const aggregates = inspect
       .prepare(`SELECT operation, payload, occurrence_count
@@ -253,7 +257,17 @@ describe('local telemetry', () => {
       occurrence_count: number;
     }[];
     inspect.close();
-    expect(aggregates).toHaveLength(3);
+    expect(aggregates).toHaveLength(5);
+    expect(
+      aggregates.filter((row) => row.operation === 'http..api.push.foreground'),
+    ).toHaveLength(2);
+    expect(
+      aggregates.find(
+        (row) =>
+          row.operation === 'http..api.push.foreground' &&
+          JSON.parse(row.payload).version === 'v1',
+      )?.occurrence_count,
+    ).toBe(2);
     expect(
       aggregates.find((row) => row.operation === 'http..api.settings')
         ?.occurrence_count,
@@ -275,8 +289,55 @@ describe('local telemetry', () => {
         version: 'v1',
       }),
     ).toBe(true);
-    expect(reopened.overview().eventCount).toBe(8);
-    expect(reopened.overview().observationCount).toBe(9);
+    expect(
+      reopened.record({
+        source: 'dashboard-server',
+        operation: 'http..api.push.foreground',
+        code: 'http-200',
+        outcome: 'success',
+        version: 'v1',
+      }),
+    ).toBe(true);
+    const laterBuckets = new DatabaseSync(join(directory, 'events.sqlite'));
+    expect(
+      (
+        laterBuckets
+          .prepare(`SELECT COUNT(*) AS count FROM events
+            WHERE operation = 'http..api.push.foreground' AND aggregate_bucket IS NOT NULL`)
+          .get() as { count: number }
+      ).count,
+    ).toBe(3);
+    laterBuckets.close();
+    expect(reopened.overview().eventCount).toBe(12);
+    expect(reopened.overview().observationCount).toBe(14);
+  });
+
+  it.each([
+    ['failure', 'http-500'],
+    ['expected', 'http-200'],
+    ['quirk', 'http-200'],
+  ] as const)('keeps repeated foreground %s outcomes as individual records', (outcome, code) => {
+    const { store } = fixture();
+    const event: TelemetryEvent = {
+      source: 'dashboard-server',
+      operation: 'http..api.push.foreground',
+      code,
+      outcome,
+      version: 'v1',
+      ...(outcome === 'quirk' ? { note: 'Foreground push issue' } : {}),
+    };
+    expect(store.record(event)).toBe(true);
+    expect(store.record(event)).toBe(true);
+    const overview = store.overview();
+    expect(overview.eventCount).toBe(2);
+    expect(overview.observationCount).toBe(2);
+    expect(
+      overview.issues.find((issue) => issue.outcome === outcome),
+    ).toMatchObject({
+      count: 2,
+      attempts: outcome === 'quirk' ? 0 : 2,
+      failures: outcome === 'failure' ? 2 : 0,
+    });
   });
 
   it('does not evict another row when an HTTP aggregate bucket is updated at capacity', () => {
@@ -284,7 +345,7 @@ describe('local telemetry', () => {
     const { store, directory } = fixture(() => now);
     const aggregate: TelemetryEvent = {
       source: 'dashboard-server',
-      operation: 'http..api.settings',
+      operation: 'http..api.push.foreground',
       code: 'http-200',
       outcome: 'success',
       version: 'v1',
@@ -366,7 +427,7 @@ describe('local telemetry', () => {
     const { store } = fixture(() => now);
     const aggregate: TelemetryEvent = {
       source: 'dashboard-server',
-      operation: 'http..api.settings',
+      operation: 'http..api.push.foreground',
       code: 'http-200',
       outcome: 'success',
       version: 'v1',
