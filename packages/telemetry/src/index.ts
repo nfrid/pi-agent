@@ -172,10 +172,11 @@ export class TelemetryStore {
       const aggregate =
         value.source === 'dashboard-server' &&
         value.outcome === 'success' &&
-        value.code === 'http-200' &&
-        (value.operation === 'http..api.settings' ||
-          value.operation === 'http..api.sessions..id.delegate.history' ||
-          value.operation === 'http..api.push.foreground');
+        ((value.code === 'http-200' &&
+          (value.operation === 'http..api.settings' ||
+            value.operation === 'http..api.sessions..id.delegate.history')) ||
+          (value.code === 'http-204' &&
+            value.operation === 'http..api.push.foreground'));
       const now = this.now();
       const aggregateValue = aggregate
         ? {

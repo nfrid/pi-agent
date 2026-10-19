@@ -228,9 +228,9 @@ describe('local telemetry', () => {
     expect(record('http..api.settings', 'v2')).toBe(true);
     expect(record('http..api.settings', 'v1', 'http-201')).toBe(true);
     expect(record('http..api.sessions..id.delegate.history')).toBe(true);
-    expect(record('http..api.push.foreground')).toBe(true);
-    expect(record('http..api.push.foreground')).toBe(true);
-    expect(record('http..api.push.foreground', 'v2')).toBe(true);
+    expect(record('http..api.push.foreground', 'v1', 'http-204')).toBe(true);
+    expect(record('http..api.push.foreground', 'v1', 'http-204')).toBe(true);
+    expect(record('http..api.push.foreground', 'v2', 'http-204')).toBe(true);
     expect(record('http..api.push.foreground', 'v1', 'http-201')).toBe(true);
     expect(record('http..api.other')).toBe(true);
     expect(
@@ -293,7 +293,7 @@ describe('local telemetry', () => {
       reopened.record({
         source: 'dashboard-server',
         operation: 'http..api.push.foreground',
-        code: 'http-200',
+        code: 'http-204',
         outcome: 'success',
         version: 'v1',
       }),
@@ -314,8 +314,8 @@ describe('local telemetry', () => {
 
   it.each([
     ['failure', 'http-500'],
-    ['expected', 'http-200'],
-    ['quirk', 'http-200'],
+    ['expected', 'http-204'],
+    ['quirk', 'http-204'],
   ] as const)('keeps repeated foreground %s outcomes as individual records', (outcome, code) => {
     const { store } = fixture();
     const event: TelemetryEvent = {
@@ -340,13 +340,35 @@ describe('local telemetry', () => {
     });
   });
 
+  it.each([
+    ['http..api.settings', 'http-204'],
+    ['http..api.sessions..id.delegate.history', 'http-204'],
+    ['http..api.push.foreground', 'http-200'],
+  ])('does not aggregate an unlisted operation/status pair: %s %s', (operation, code) => {
+    const { store } = fixture();
+    const event: TelemetryEvent = {
+      source: 'dashboard-server',
+      operation,
+      code,
+      outcome: 'success',
+      version: 'v1',
+    };
+    expect(store.record(event)).toBe(true);
+    expect(store.record(event)).toBe(true);
+    expect(store.overview()).toMatchObject({
+      eventCount: 2,
+      observationCount: 2,
+      issues: [],
+    });
+  });
+
   it('does not evict another row when an HTTP aggregate bucket is updated at capacity', () => {
     let now = 100;
     const { store, directory } = fixture(() => now);
     const aggregate: TelemetryEvent = {
       source: 'dashboard-server',
       operation: 'http..api.push.foreground',
-      code: 'http-200',
+      code: 'http-204',
       outcome: 'success',
       version: 'v1',
     };
@@ -428,7 +450,7 @@ describe('local telemetry', () => {
     const aggregate: TelemetryEvent = {
       source: 'dashboard-server',
       operation: 'http..api.push.foreground',
-      code: 'http-200',
+      code: 'http-204',
       outcome: 'success',
       version: 'v1',
     };

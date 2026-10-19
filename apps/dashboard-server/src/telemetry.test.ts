@@ -153,7 +153,33 @@ describe('dashboard telemetry', () => {
     });
     expect(telemetry.overview().eventCount).toBe(before + 1);
   });
-  it('aggregates real authenticated settings GET requests using the emitted operation name', async () => {
+  it.each([
+    {
+      path: '/api/settings',
+      method: 'GET',
+      status: 200,
+      operation: 'http..api.settings',
+      body: undefined,
+    },
+    {
+      path: '/api/push/foreground',
+      method: 'POST',
+      status: 204,
+      operation: 'http..api.push.foreground',
+      body: {
+        endpoint: 'https://push.example.test/subscription',
+        tabId: 'telemetry-tab',
+        visible: false,
+        focused: false,
+      },
+    },
+  ])('aggregates real authenticated $method $path requests using the emitted status and operation', async ({
+    path,
+    method,
+    status,
+    operation,
+    body,
+  }) => {
     const { dir } = fixture();
     server = await createDashboardServer({
       port: 0,
@@ -164,15 +190,18 @@ describe('dashboard telemetry', () => {
       telemetryDir: join(dir, 'telemetry'),
     });
     await server.start();
-    const url = `http://127.0.0.1:${server.port}/api/settings`;
+    const url = `http://127.0.0.1:${server.port}${path}`;
     for (let index = 0; index < 3; index++) {
       const response = await fetch(url, {
+        method,
         headers: {
           origin: 'http://dashboard.test',
           'x-dashboard-token': 'telemetry-test-token',
+          ...(body ? { 'content-type': 'application/json' } : {}),
         },
+        ...(body ? { body: JSON.stringify(body) } : {}),
       });
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(status);
     }
     const db = new DatabaseSync(join(dir, 'telemetry', 'events.sqlite'));
     const rows = db.prepare(
@@ -184,8 +213,8 @@ describe('dashboard telemetry', () => {
         .poll(() => rows.all())
         .toEqual([
           {
-            operation: 'http..api.settings',
-            code: 'http-200',
+            operation,
+            code: `http-${status}`,
             outcome: 'success',
             occurrence_count: 3,
           },
