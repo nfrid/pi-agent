@@ -846,10 +846,12 @@ function mergeNestedReadImages(
   result: unknown,
 ): void {
   if (!isRecord(result)) return;
-  const details = isRecord(result.details) ? result.details : result;
-  if (!Array.isArray(details.nestedReadImages)) return;
-  const parentContent = result.content;
-  if (!Array.isArray(parentContent)) return;
+  const details = isRecord(result.details) ? result.details : undefined;
+  if (!Array.isArray(details?.nestedReadImages)) return;
+  if (!Array.isArray(result.content)) return;
+  const parentImages = result.content.filter(
+    (block) => isRecord(block) && block.type === 'image',
+  );
   for (const mapping of details.nestedReadImages.slice(0, 256)) {
     if (!isRecord(mapping)) continue;
     const toolCallId = directString(mapping, 'toolCallId');
@@ -862,14 +864,18 @@ function mergeNestedReadImages(
       !Array.isArray(mapping.imageIndexes)
     )
       continue;
-    const images = mapping.imageIndexes
-      .slice(0, 4)
-      .filter(
-        (index): index is number =>
-          Number.isInteger(index) && index >= 0 && index < parentContent.length,
-      )
-      .map((index) => parentContent[index])
-      .filter((block) => isRecord(block) && block.type === 'image');
+    const indexes = new Set(
+      mapping.imageIndexes
+        .slice(0, 4)
+        .filter(
+          (index): index is number =>
+            Number.isInteger(index) &&
+            index >= 0 &&
+            index <= 3 &&
+            index < parentImages.length,
+        ),
+    );
+    const images = [...indexes].map((index) => parentImages[index]);
     if (!images.length) continue;
     const previous = child.result;
     const content =
@@ -878,14 +884,22 @@ function mergeNestedReadImages(
         : typeof previous === 'string'
           ? [{ type: 'text', text: previous }]
           : [];
-    child.result = {
-      ...(isRecord(previous) ? previous : {}),
-      content: [...content, ...images],
+    items[toolCallId] = {
+      ...child,
+      result: {
+        ...(isRecord(previous) ? previous : {}),
+        content: [
+          ...content.filter(
+            (block) => !isRecord(block) || block.type !== 'image',
+          ),
+          ...images,
+        ],
+      },
     };
   }
 }
 
-/** Pi persists bounded metadata for nested calls, never their results. */
+/** Restore nested metadata and references to images already in the root result. */
 function mergeNestedCalls(
   projection: TranscriptProjection,
   rootId: string,

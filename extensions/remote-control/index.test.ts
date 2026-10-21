@@ -3332,6 +3332,96 @@ describe('agent settlement', () => {
     getLiveExtensionSurfaceHub(scope).clear('remote-control');
   });
 
+  it('publishes nested parent image references before the result is persisted', () => {
+    const previousSocket = process.env.PI_DASHBOARD_SOCKET;
+    process.env.PI_DASHBOARD_SOCKET = path.join(
+      os.tmpdir(),
+      `pi-images-offline-${randomUUID()}.sock`,
+    );
+    type Handler = (event: unknown, ctx: ExtensionContext) => unknown;
+    const handlers = new Map<string, Handler[]>();
+    const ctx = {
+      cwd: '/tmp',
+      isIdle: () => true,
+      hasPendingMessages: () => false,
+      getContextUsage: () => undefined,
+      sessionManager: {
+        getSessionId: () => 'image-session',
+        getSessionFile: () => undefined,
+        getSessionName: () => undefined,
+        getCwd: () => '/tmp',
+        getLeafId: () => 'previous-entry',
+        getBranch: () => [],
+        getEntries: () => [],
+      },
+    } as unknown as ExtensionContext;
+    const pi = {
+      on: (name: string, handler: Handler) => {
+        const registered = handlers.get(name) ?? [];
+        registered.push(handler);
+        handlers.set(name, registered);
+      },
+      events: { on: () => () => undefined, emit: vi.fn() },
+      registerTool: vi.fn(),
+      getCommands: () => [],
+      appendEntry: vi.fn(),
+    } as unknown as ExtensionAPI;
+    const send = vi.spyOn(BridgeClient.prototype, 'sendEvent');
+    const dispatch = (name: string, event: unknown) => {
+      for (const handler of handlers.get(name) ?? []) handler(event, ctx);
+    };
+    try {
+      remoteControlExtension(pi);
+      dispatch('session_start', {});
+      dispatch('message_end', {
+        message: {
+          role: 'toolResult',
+          toolCallId: 'compose',
+          toolName: 'codemode',
+          timestamp: 12345,
+          content: [{ type: 'image', mimeType: 'image/png', data: 'aW1hZ2U=' }],
+          details: {
+            nestedReadImages: [{ toolCallId: 'compose/1', imageIndexes: [0] }],
+          },
+          nestedCalls: { complete: true, calls: [] },
+        },
+      });
+      const finished = send.mock.calls
+        .map(([event]) => event)
+        .find((event) => event.type === 'tool.finished');
+      expect(finished).toMatchObject({
+        tool: {
+          toolCallId: 'compose',
+          result: {
+            content: [
+              {
+                type: 'image',
+                omitted: true,
+                sessionImageRef: {
+                  entryId: 'compose',
+                  imageIndex: 0,
+                  messageTimestamp: 12345,
+                },
+              },
+            ],
+            details: {
+              nestedReadImages: [
+                { toolCallId: 'compose/1', imageIndexes: [0] },
+              ],
+            },
+          },
+        },
+      });
+      expect(JSON.stringify(finished)).not.toContain('aW1hZ2U=');
+      expect(JSON.stringify(finished)).not.toContain('previous-entry');
+    } finally {
+      dispatch('session_shutdown', { reason: 'quit' });
+      send.mockRestore();
+      if (previousSocket === undefined) delete process.env.PI_DASHBOARD_SOCKET;
+      else process.env.PI_DASHBOARD_SOCKET = previousSocket;
+    }
+  });
+
   it('persists response closure through the extension with an unavailable bridge', () => {
     const previousSocket = process.env.PI_DASHBOARD_SOCKET;
     process.env.PI_DASHBOARD_SOCKET = path.join(

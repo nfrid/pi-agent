@@ -1075,6 +1075,32 @@ describe('dashboard protocol', () => {
     });
   });
 
+  it('adds a timestamp lookup to live tool image aliases without leaking bytes', () => {
+    expect(
+      redactSessionEntryImages(
+        {
+          id: 'compose',
+          content: [{ type: 'image', mimeType: 'image/png', data: 'aW1hZ2U=' }],
+        },
+        12345,
+      ),
+    ).toEqual({
+      id: 'compose',
+      content: [
+        {
+          type: 'image',
+          mimeType: 'image/png',
+          omitted: true,
+          sessionImageRef: {
+            entryId: 'compose',
+            imageIndex: 0,
+            messageTimestamp: 12345,
+          },
+        },
+      ],
+    });
+  });
+
   it('accepts bounded image-only commands and redacts image bytes', () => {
     expect(
       validateBridgeCommand({

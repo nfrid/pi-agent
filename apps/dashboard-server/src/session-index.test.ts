@@ -93,6 +93,7 @@ describe('session index', () => {
           message: {
             role: 'toolResult',
             toolCallId: 'read-call',
+            timestamp: 12345,
             content: [
               { type: 'text', text: 'read result' },
               { type: 'image', mimeType: 'image/gif', data: gif },
@@ -144,6 +145,12 @@ describe('session index', () => {
     expect(JSON.stringify(history.entries)).not.toContain(gif);
     await expect(
       index.readImage('tool-image-session', 'tool-result-entry', 0),
+    ).resolves.toEqual({
+      data: Buffer.from(gif, 'base64'),
+      mediaType: 'image/gif',
+    });
+    await expect(
+      index.readImage('tool-image-session', 'read-call', 0, 12345),
     ).resolves.toEqual({
       data: Buffer.from(gif, 'base64'),
       mediaType: 'image/gif',

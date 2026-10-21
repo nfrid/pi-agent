@@ -31,7 +31,10 @@ export function redactImageData(value: unknown): unknown {
 }
 
 /** Redact session image bytes while retaining a bounded lookup reference. */
-export function redactSessionEntryImages(value: unknown): unknown {
+export function redactSessionEntryImages(
+  value: unknown,
+  messageTimestamp?: number | string,
+): unknown {
   const redacted = redactImageData(value);
   if (!isRecord(value) || !isRecord(redacted)) return redacted;
   const entryId =
@@ -75,7 +78,11 @@ export function redactSessionEntryImages(value: unknown): unknown {
     if (hasImageData && imageIndex <= 3) {
       safeContent[index] = {
         ...safePart,
-        sessionImageRef: { entryId, imageIndex },
+        sessionImageRef: {
+          entryId,
+          imageIndex,
+          ...(messageTimestamp === undefined ? {} : { messageTimestamp }),
+        },
       };
     }
     imageIndex += 1;

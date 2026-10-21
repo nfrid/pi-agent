@@ -1160,8 +1160,18 @@ describe('dashboard domain reducers', () => {
   });
 
   it('restores only validated nested read images from parent content', () => {
-    const imageA = { type: 'image', data: 'ref-a', mimeType: 'image/png' };
-    const imageB = { type: 'image', data: 'ref-b', mimeType: 'image/jpeg' };
+    const imageA = {
+      type: 'image',
+      omitted: true,
+      mimeType: 'image/png',
+      sessionImageRef: { entryId: 'root-entry', imageIndex: 0 },
+    };
+    const imageB = {
+      type: 'image',
+      omitted: true,
+      mimeType: 'image/jpeg',
+      sessionImageRef: { entryId: 'root-entry', imageIndex: 1 },
+    };
     const entries = [
       {
         type: 'message',
@@ -1176,7 +1186,12 @@ describe('dashboard domain reducers', () => {
           role: 'toolResult',
           toolCallId: 'root',
           toolName: 'codemode',
-          content: [imageA, imageB],
+          content: [
+            { type: 'text', text: 'First image' },
+            imageA,
+            { type: 'text', text: 'Second image' },
+            imageB,
+          ],
           nestedCalls: {
             calls: [
               { id: 'root/1', name: 'read', status: 'ok' },
@@ -1207,6 +1222,66 @@ describe('dashboard domain reducers', () => {
     expect(rendered.find((item) => item.key === 'root/1')).toMatchObject({
       result: { content: [imageB] },
     });
+  });
+
+  it('replaces nested live image placeholders idempotently without mutating prior text or state', () => {
+    const initial = hydrateTranscript([], 's');
+    const child = reduceTranscriptEvent(initial, {
+      type: 'tool.finished',
+      sessionId: 's',
+      tool: {
+        toolCallId: 'root/1',
+        parentToolCallId: 'root',
+        name: 'read',
+        result: {
+          content: [
+            { type: 'text', text: 'Read image file [image/png]' },
+            { type: 'image', mimeType: 'image/png', omitted: true },
+          ],
+        },
+      },
+    } as never);
+    const previousChild = structuredClone(child.items['root/1']);
+    const image = {
+      type: 'image',
+      mimeType: 'image/png',
+      omitted: true,
+      sessionImageRef: {
+        entryId: 'root',
+        imageIndex: 0,
+        messageTimestamp: 12345,
+      },
+    };
+    const event = {
+      type: 'tool.finished',
+      sessionId: 's',
+      tool: {
+        toolCallId: 'root',
+        name: 'codemode',
+        result: {
+          content: [{ type: 'text', text: 'Script output' }, image],
+          details: {
+            nestedReadImages: [
+              { toolCallId: 'root/1', imageIndexes: [0, 0, -1, 4] },
+              { toolCallId: 'other/1', imageIndexes: [0] },
+            ],
+          },
+          nestedCalls: {
+            calls: [{ id: 'root/1', name: 'read', status: 'ok' }],
+          },
+        },
+      },
+    };
+    const merged = reduceTranscriptEvent(child, event as never);
+    const repeated = reduceTranscriptEvent(merged, event as never);
+    expect(repeated.items['root/1']).toMatchObject({
+      result: {
+        content: [{ type: 'text', text: 'Read image file [image/png]' }, image],
+      },
+    });
+    expect(repeated.items['root/1']).toEqual(merged.items['root/1']);
+    expect(child.items['root/1']).toEqual(previousChild);
+    expect(repeated.items['other/1']).toBeUndefined();
   });
 
   it('keeps nested live calls with their parent and restores bounded metadata without inventing results', () => {

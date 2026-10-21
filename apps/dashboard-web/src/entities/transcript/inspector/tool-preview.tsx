@@ -432,7 +432,11 @@ function readResultImages(value: unknown): Array<{
   key: string;
   mimeType: string;
   data?: string;
-  reference?: { entryId: string; imageIndex: number };
+  reference?: {
+    entryId: string;
+    imageIndex: number;
+    messageTimestamp?: number | string;
+  };
 }> {
   const content =
     value && typeof value === 'object' && !Array.isArray(value)
@@ -468,12 +472,26 @@ function readResultImages(value: unknown): Array<{
       reference && typeof reference === 'object'
         ? (reference as ToolRecord).imageIndex
         : undefined;
+    const rawTimestamp =
+      reference && typeof reference === 'object'
+        ? (reference as ToolRecord).messageTimestamp
+        : undefined;
+    const messageTimestamp =
+      typeof rawTimestamp === 'number' && Number.isFinite(rawTimestamp)
+        ? rawTimestamp
+        : typeof rawTimestamp === 'string' && rawTimestamp.length <= 512
+          ? rawTimestamp
+          : undefined;
     const safeReference =
       typeof entryId === 'string' &&
       Number.isInteger(imageIndex) &&
       (imageIndex as number) >= 0 &&
       (imageIndex as number) <= 3
-        ? { entryId, imageIndex: imageIndex as number }
+        ? {
+            entryId,
+            imageIndex: imageIndex as number,
+            ...(messageTimestamp === undefined ? {} : { messageTimestamp }),
+          }
         : undefined;
     const validData =
       typeof image.data === 'string' &&
@@ -519,6 +537,7 @@ function ReadResultImage({
   const [failed, setFailed] = useState(false);
   const entryId = image.reference?.entryId;
   const imageIndex = image.reference?.imageIndex;
+  const messageTimestamp = image.reference?.messageTimestamp;
   useEffect(() => {
     setSource(undefined);
     setFailed(false);
@@ -535,6 +554,7 @@ function ReadResultImage({
     void dashboardHttpClient
       .sessionImage(sessionId, entryId, imageIndex, {
         signal: controller.signal,
+        ...(messageTimestamp === undefined ? {} : { messageTimestamp }),
       })
       .then((blob) => {
         if (controller.signal.aborted) return;
@@ -548,7 +568,14 @@ function ReadResultImage({
       controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [entryId, image.data, imageIndex, image.mimeType, sessionId]);
+  }, [
+    entryId,
+    image.data,
+    imageIndex,
+    image.mimeType,
+    messageTimestamp,
+    sessionId,
+  ]);
   return source ? (
     <img
       className="tool-read-image"

@@ -5783,6 +5783,128 @@ test('shows historical read images and text in tool details @desktop', async ({
   await mocks.close();
 });
 
+for (const live of [true, false]) {
+  test(`shows nested codemode read images ${live ? 'live' : 'from persisted history'} @desktop`, async ({
+    page,
+  }) => {
+    const png =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/aX8AAAAASUVORK5CYII=';
+    const entries: unknown[] = [
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'compose-image',
+              name: 'codemode',
+              arguments: {
+                code: 'const r = await tools.read({path:"screenshot.png"}); for (const b of r.images) image(b);',
+              },
+            },
+          ],
+        },
+      },
+    ];
+    const entryId = live ? 'compose-image' : 'persisted-compose-image';
+    const result = {
+      content: [
+        {
+          type: 'image',
+          mimeType: 'image/png',
+          omitted: true,
+          sessionImageRef: {
+            entryId,
+            imageIndex: 0,
+            ...(live ? { messageTimestamp: 12345 } : {}),
+          },
+        },
+      ],
+      details: {
+        nestedReadImages: [
+          { toolCallId: 'compose-image/1', imageIndexes: [0] },
+        ],
+      },
+      nestedCalls: {
+        complete: true,
+        calls: [
+          {
+            id: 'compose-image/1',
+            name: 'read',
+            arguments: { path: 'screenshot.png' },
+            status: 'ok',
+          },
+        ],
+      },
+    };
+    if (!live)
+      entries.push({
+        type: 'message',
+        id: entryId,
+        message: {
+          role: 'toolResult',
+          toolCallId: 'compose-image',
+          toolName: 'codemode',
+          isError: false,
+          ...result,
+        },
+      });
+    const requests: string[] = [];
+    await page.route('**/api/sessions/s1/images/**', async (route) => {
+      requests.push(route.request().url());
+      await route.fulfill({
+        contentType: 'image/png',
+        body: Buffer.from(png, 'base64'),
+      });
+    });
+    const mocks = await installPhase6Mocks(page, { entries });
+    await page.goto('/sessions/s1');
+    if (live) {
+      await page.waitForFunction(
+        () =>
+          (
+            window as unknown as { phase6Stream: { session(): unknown } }
+          ).phase6Stream.session() !== undefined,
+      );
+      await mocks.emit({
+        event: {
+          type: 'tool.finished',
+          sessionId: 's1',
+          tool: {
+            toolCallId: 'compose-image',
+            name: 'codemode',
+            phase: 'finished',
+            isError: false,
+            result,
+          },
+        },
+      });
+    }
+    const tools = page.locator('details.tool-detail');
+    await expect(tools).toHaveCount(2);
+    const child = tools.nth(1);
+    await child.locator(':scope > summary').click();
+    const image = child.locator('.tool-read-image');
+    await expect(image).toBeVisible();
+    await expect
+      .poll(() =>
+        image.evaluate((element: HTMLImageElement) => element.naturalWidth),
+      )
+      .toBe(1);
+    expect(requests).toHaveLength(1);
+    const request = requests[0];
+    if (!request) throw new Error('Missing image request');
+    expect(new URL(request).pathname).toBe(
+      `/api/sessions/s1/images/${entryId}/0`,
+    );
+    expect(new URL(request).searchParams.get('timestamp')).toBe(
+      live ? '12345' : null,
+    );
+    await mocks.close();
+  });
+}
+
 test('shows structured delegate content while the delegate is running @desktop', async ({
   page,
 }) => {

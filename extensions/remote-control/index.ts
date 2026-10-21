@@ -2,6 +2,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
+import { redactSessionEntryImages } from '@pi-dashboard/protocol/pi-runtime-protocol';
 import {
   CODEX_SERVICE_TIER_CHANGED,
   type CodexServiceTier,
@@ -318,6 +319,22 @@ export default defineExtension('remote-control', (pi) => {
       directString(message, 'role') === 'toolResult' &&
       directValue(message, 'nestedCalls')
     ) {
+      const timestamp = directValue(message, 'timestamp');
+      // message_end runs before persistence. Timestamp lookup resolves this
+      // live alias to the entry after the tool result has been appended.
+      const result = redactSessionEntryImages(
+        {
+          id: directString(message, 'toolCallId'),
+          content: directValue(message, 'content'),
+          details: directValue(message, 'details'),
+          nestedCalls: directValue(message, 'nestedCalls'),
+        },
+        typeof timestamp === 'number' && Number.isFinite(timestamp)
+          ? timestamp
+          : typeof timestamp === 'string' && timestamp.length <= 512
+            ? timestamp
+            : undefined,
+      );
       runtime.client.sendEvent({
         type: 'tool.finished',
         sessionId: ctx.sessionManager.getSessionId(),
@@ -325,11 +342,7 @@ export default defineExtension('remote-control', (pi) => {
           toolCallId: directString(message, 'toolCallId'),
           toolName: directString(message, 'toolName'),
           isError: directValue(message, 'isError'),
-          result: {
-            content: directValue(message, 'content'),
-            details: directValue(message, 'details'),
-            nestedCalls: directValue(message, 'nestedCalls'),
-          },
+          result,
         }),
       });
       return;
