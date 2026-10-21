@@ -3,7 +3,10 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { MAX_FILE_READ_BYTES } from '@pi-dashboard/protocol';
+import {
+  MAX_FILE_MEDIA_BYTES,
+  MAX_FILE_READ_BYTES,
+} from '@pi-dashboard/protocol';
 import Fastify from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import { readFile } from './file-read.js';
@@ -147,6 +150,49 @@ describe('host file reads', () => {
     }
   });
 
+  it('returns bounded whitelisted image formats as base64 while unknown binaries remain errors', async () => {
+    const root = await tempRoot('dashboard-file-read-media-');
+    const imageBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff]);
+    for (const [name, mediaType] of [
+      ['pixel.png', 'image/png'],
+      ['pixel.jpeg', 'image/jpeg'],
+      ['pixel.JPG', 'image/jpeg'],
+      ['pixel.gif', 'image/gif'],
+      ['pixel.webp', 'image/webp'],
+      ['pixel.avif', 'image/avif'],
+      ['pixel.bmp', 'image/bmp'],
+      ['pixel.ico', 'image/x-icon'],
+      ['drawing.svg', 'image/svg+xml'],
+    ]) {
+      const file = path.join(root, name);
+      await writeFile(file, imageBytes);
+      await expect(readFile({ path: file })).resolves.toEqual({
+        path: path.resolve(file),
+        mediaType,
+        base64Content: imageBytes.toString('base64'),
+      });
+    }
+
+    const unknown = path.join(root, 'binary.bin');
+    await writeFile(unknown, imageBytes);
+    await expect(readFile({ path: unknown })).rejects.toThrow('binary');
+
+    const atLimit = path.join(root, 'at-limit.png');
+    await writeFile(atLimit, Buffer.alloc(MAX_FILE_MEDIA_BYTES, 0x61));
+    const atLimitResult = await readFile({ path: atLimit });
+    expect(atLimitResult).toMatchObject({
+      path: path.resolve(atLimit),
+      mediaType: 'image/png',
+    });
+    expect(
+      'base64Content' in atLimitResult ? atLimitResult.base64Content : '',
+    ).toHaveLength(Math.ceil(MAX_FILE_MEDIA_BYTES / 3) * 4);
+
+    const tooLarge = path.join(root, 'large.png');
+    await writeFile(tooLarge, Buffer.alloc(MAX_FILE_MEDIA_BYTES + 1));
+    await expect(readFile({ path: tooLarge })).rejects.toThrow('10 MiB');
+  });
+
   it('rejects oversized, binary, invalid UTF-8, and FIFO inputs without blocking', async () => {
     const root = await tempRoot('dashboard-file-read-bounds-');
     const large = path.join(root, 'large.txt');
@@ -179,6 +225,9 @@ describe('host file reads', () => {
     const root = await tempRoot('dashboard-file-read-route-');
     const file = path.join(root, 'route.txt');
     await writeFile(file, 'route content');
+    const imageFile = path.join(root, 'route.png');
+    const imageBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff]);
+    await writeFile(imageFile, imageBytes);
     const app = Fastify();
     apps.push(app);
     await app.register(dashboardRoutes, {
@@ -202,6 +251,19 @@ describe('host file reads', () => {
     expect(response.json().result.data).toEqual({
       path: path.resolve(file),
       content: 'route content',
+    });
+
+    const mediaResponse = await app.inject({
+      method: 'POST',
+      url: '/trpc/readFile',
+      headers,
+      payload: { path: imageFile },
+    });
+    expect(mediaResponse.statusCode).toBe(200);
+    expect(mediaResponse.json().result.data).toEqual({
+      path: path.resolve(imageFile),
+      mediaType: 'image/png',
+      base64Content: imageBytes.toString('base64'),
     });
 
     const unauthorized = await app.inject({

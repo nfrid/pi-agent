@@ -26,6 +26,7 @@ import {
   MAX_COMPOSER_COMMANDS,
   MAX_COMPOSER_FILE_QUERY,
   MAX_COMPOSER_FILE_SUGGESTIONS,
+  MAX_FILE_MEDIA_BASE64_CHARS,
   MAX_FILE_READ_BYTES,
   MAX_ID,
   MAX_MODEL_DISPLAY_ALIAS,
@@ -488,13 +489,32 @@ export const FileReadRequestSchema = Type.Object(
 );
 export type FileReadRequest = Static<typeof FileReadRequestSchema>;
 
-export const FileReadResultSchema = Type.Object(
-  {
-    path: Type.String({ minLength: 1, maxLength: MAX_PATH }),
-    content: Type.String({ maxLength: MAX_FILE_READ_BYTES }),
-  },
-  { additionalProperties: false },
-);
+export const FileReadResultSchema = Type.Union([
+  Type.Object(
+    {
+      path: Type.String({ minLength: 1, maxLength: MAX_PATH }),
+      content: Type.String({ maxLength: MAX_FILE_READ_BYTES }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      path: Type.String({ minLength: 1, maxLength: MAX_PATH }),
+      mediaType: Type.Union([
+        Type.Literal('image/png'),
+        Type.Literal('image/jpeg'),
+        Type.Literal('image/gif'),
+        Type.Literal('image/webp'),
+        Type.Literal('image/avif'),
+        Type.Literal('image/bmp'),
+        Type.Literal('image/x-icon'),
+        Type.Literal('image/svg+xml'),
+      ]),
+      base64Content: Type.String({ maxLength: MAX_FILE_MEDIA_BASE64_CHARS }),
+    },
+    { additionalProperties: false },
+  ),
+]);
 export type FileReadResult = Static<typeof FileReadResultSchema>;
 
 /** Runtime composer-command catalogue response. */

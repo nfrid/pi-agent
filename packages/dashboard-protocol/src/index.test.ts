@@ -14,6 +14,8 @@ import {
   isBridgeEvent,
   LiveDiagnosticsResponseSchema,
   LiveExtensionSurfaceSchema,
+  MAX_FILE_MEDIA_BASE64_CHARS,
+  MAX_FILE_MEDIA_BYTES,
   MAX_FILE_READ_BYTES,
   MAX_FRAME_BYTES,
   MAX_MODEL_DISPLAY_ALIAS,
@@ -106,6 +108,32 @@ describe('dashboard protocol', () => {
       parseFileReadResult({ path: '/tmp/read.txt', content: 'hello' }),
     ).toEqual({ path: '/tmp/read.txt', content: 'hello' });
     expect(() => parseFileReadResult({ path: '/tmp/read.txt' })).toThrow();
+    expect(
+      parseFileReadResult({
+        path: '/tmp/image.png',
+        mediaType: 'image/png',
+        base64Content: 'iVBORw==',
+      }),
+    ).toEqual({
+      path: '/tmp/image.png',
+      mediaType: 'image/png',
+      base64Content: 'iVBORw==',
+    });
+    expect(() =>
+      parseFileReadResult({
+        path: '/tmp/image.html',
+        mediaType: 'text/html',
+        base64Content: 'PGh0bWw+',
+      }),
+    ).toThrow();
+    expect(() =>
+      parseFileReadResult({
+        path: '/tmp/image.png',
+        mediaType: 'image/png',
+        base64Content: 'x'.repeat(MAX_FILE_MEDIA_BASE64_CHARS + 1),
+      }),
+    ).toThrow();
+    expect(MAX_FILE_MEDIA_BYTES).toBe(10 * 1024 * 1024);
     expect(() =>
       parseFileReadResult({
         path: '/tmp/read.txt',

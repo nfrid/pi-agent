@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   type FileReadRequest,
   type FileReadResult,
+  MAX_FILE_MEDIA_BYTES,
   MAX_FILE_READ_BYTES,
   MAX_PATH,
 } from '@pi-dashboard/protocol';
@@ -131,6 +132,30 @@ function invalidUtf8(): FileReadError {
   return new FileReadError('binary', 'File is binary or not valid UTF-8 text.');
 }
 
+const IMAGE_TYPES_BY_EXTENSION: Readonly<
+  Record<
+    string,
+    | 'image/png'
+    | 'image/jpeg'
+    | 'image/gif'
+    | 'image/webp'
+    | 'image/avif'
+    | 'image/bmp'
+    | 'image/x-icon'
+    | 'image/svg+xml'
+  >
+> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.avif': 'image/avif',
+  '.bmp': 'image/bmp',
+  '.ico': 'image/x-icon',
+  '.svg': 'image/svg+xml',
+};
+
 /** Read one normalized host path without invoking a shell or falling back to process.cwd(). */
 export async function readFile(
   request: FileReadRequest,
@@ -145,13 +170,16 @@ export async function readFile(
     const initialStats = await handle.stat();
     if (!initialStats.isFile())
       throw new FileReadError('not-regular', 'Only regular files can be read.');
-    if (initialStats.size > MAX_FILE_READ_BYTES)
+    const mediaType =
+      IMAGE_TYPES_BY_EXTENSION[path.extname(resolvedPath).toLowerCase()];
+    const maxBytes = mediaType ? MAX_FILE_MEDIA_BYTES : MAX_FILE_READ_BYTES;
+    if (initialStats.size > maxBytes)
       throw new FileReadError(
         'too-large',
-        'File is too large to read (maximum 1 MiB).',
+        `File is too large to read (maximum ${mediaType ? '10 MiB' : '1 MiB'}).`,
       );
 
-    const bytes = Buffer.allocUnsafe(MAX_FILE_READ_BYTES + 1);
+    const bytes = Buffer.allocUnsafe(maxBytes + 1);
     let length = 0;
     while (length < bytes.length) {
       const result = await handle.read(
@@ -163,19 +191,20 @@ export async function readFile(
       length += result.bytesRead;
       if (result.bytesRead === 0) break;
     }
-    if (length > MAX_FILE_READ_BYTES) {
+    if (length > maxBytes || (await handle.stat()).size > maxBytes) {
       throw new FileReadError(
         'too-large',
-        'File is too large to read (maximum 1 MiB).',
+        `File is too large to read (maximum ${mediaType ? '10 MiB' : '1 MiB'}).`,
       );
     }
-    if ((await handle.stat()).size > MAX_FILE_READ_BYTES)
-      throw new FileReadError(
-        'too-large',
-        'File is too large to read (maximum 1 MiB).',
-      );
 
     const contentBytes = bytes.subarray(0, length);
+    if (mediaType)
+      return {
+        path: resolvedPath,
+        mediaType,
+        base64Content: contentBytes.toString('base64'),
+      };
     if (contentBytes.includes(0)) throw invalidUtf8();
     let content: string;
     try {

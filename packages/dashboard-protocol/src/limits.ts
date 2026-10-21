@@ -2,6 +2,11 @@ export const MAX_ID = 256;
 export const MAX_PATH = 4096;
 /** Maximum UTF-8 bytes returned by an authenticated host-file read. */
 export const MAX_FILE_READ_BYTES = 1024 * 1024;
+/** Maximum raw bytes returned for an authenticated image preview. */
+export const MAX_FILE_MEDIA_BYTES = 10 * 1024 * 1024;
+/** Maximum base64 characters needed to transport one bounded image preview. */
+export const MAX_FILE_MEDIA_BASE64_CHARS =
+  Math.ceil(MAX_FILE_MEDIA_BYTES / 3) * 4;
 /** Limits shared by browser selection and server multipart validation. */
 export const MAX_ATTACHMENT_COUNT = 4;
 export const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;

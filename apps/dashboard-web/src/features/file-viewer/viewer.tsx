@@ -49,13 +49,15 @@ export function FileViewer({
   const [refreshToken, setRefreshToken] = useState(0);
   const [copied, setCopied] = useState(false);
   const [headingFound, setHeadingFound] = useState<boolean | undefined>();
+  const [mediaFailed, setMediaFailed] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
   const codeViewRef = useRef<CodeViewHandle<undefined, undefined>>(null);
   const restoredVisit = useRef<string | undefined>(undefined);
   const markdown = /\.(?:md|markdown)$/i.test(entry.location.path);
   const targetLine = entry.location.startLine;
   const selectedRange = useMemo(() => {
-    if (!file || targetLine === undefined) return undefined;
+    if (!file || !('content' in file) || targetLine === undefined)
+      return undefined;
     const end = entry.location.endLine ?? targetLine;
     const lineCount = fileLineCount(file.content);
     if (targetLine < 1 || end < targetLine || end > lineCount) return undefined;
@@ -66,7 +68,10 @@ export function FileViewer({
     file !== undefined &&
     selectedRange === undefined;
   const fileContents = useMemo<FileContents | undefined>(
-    () => (file ? { name: file.path, contents: file.content } : undefined),
+    () =>
+      file && 'content' in file
+        ? { name: file.path, contents: file.content }
+        : undefined,
     [file],
   );
   const items = useMemo(
@@ -97,6 +102,7 @@ export function FileViewer({
     const controller = new AbortController();
     setLoading(true);
     setError(undefined);
+    setMediaFailed(false);
     setFile(undefined);
     void client
       .readFile(
@@ -288,49 +294,78 @@ export function FileViewer({
             </button>
           </div>
         )}
-        {!loading && !error && file && entry.mode === 'preview' && markdown && (
-          <div
-            className={`${styles.preview} markdown`}
-            ref={previewRef}
-            onScroll={(event) =>
-              rememberScroll('preview', event.currentTarget.scrollTop)
-            }
-          >
-            <FileLinkContext.Provider
-              value={{ cwd: parentDirectory(file.path), path: file.path }}
-            >
-              <Markdown headingIds allowImages={false}>
-                {file.content}
-              </Markdown>
-            </FileLinkContext.Provider>
-            {entry.location.heading && headingFound === false && (
-              <p className={styles.message} role="status">
-                Heading not found in this file.
-              </p>
+        {!loading && !error && file && 'mediaType' in file && (
+          <div className={styles.mediaPreview}>
+            {mediaFailed ? (
+              <div className={styles.message} role="alert">
+                <strong>Could not display image</strong>
+                <p>The browser could not decode this image file.</p>
+                <button type="button" onClick={refresh}>
+                  Try again
+                </button>
+              </div>
+            ) : (
+              <img
+                className={styles.image}
+                src={`data:${file.mediaType};base64,${file.base64Content}`}
+                alt={file.path.split('/').at(-1) ?? 'Image preview'}
+                onError={() => setMediaFailed(true)}
+              />
             )}
           </div>
         )}
-        {!loading && !error && file && entry.mode === 'source' && (
-          <>
-            {targetOutOfRange && (
-              <div className={styles.rangeNotice} role="status">
-                Lines {targetLine}–{entry.location.endLine ?? targetLine} are
-                outside this file ({fileLineCount(file.content)} lines); showing
-                the file without a selection.
-              </div>
-            )}
-            <section className={styles.code} aria-label="File source">
-              <CodeView
-                ref={codeViewRef}
-                items={items}
-                className={styles.codeView}
-                options={options}
-                selectedLines={sourceSelection}
-                onScroll={(scrollTop) => rememberScroll('source', scrollTop)}
-              />
-            </section>
-          </>
-        )}
+        {!loading &&
+          !error &&
+          file &&
+          'content' in file &&
+          entry.mode === 'preview' &&
+          markdown && (
+            <div
+              className={`${styles.preview} markdown`}
+              ref={previewRef}
+              onScroll={(event) =>
+                rememberScroll('preview', event.currentTarget.scrollTop)
+              }
+            >
+              <FileLinkContext.Provider
+                value={{ cwd: parentDirectory(file.path), path: file.path }}
+              >
+                <Markdown headingIds allowImages={false}>
+                  {file.content}
+                </Markdown>
+              </FileLinkContext.Provider>
+              {entry.location.heading && headingFound === false && (
+                <p className={styles.message} role="status">
+                  Heading not found in this file.
+                </p>
+              )}
+            </div>
+          )}
+        {!loading &&
+          !error &&
+          file &&
+          'content' in file &&
+          entry.mode === 'source' && (
+            <>
+              {targetOutOfRange && (
+                <div className={styles.rangeNotice} role="status">
+                  Lines {targetLine}–{entry.location.endLine ?? targetLine} are
+                  outside this file ({fileLineCount(file.content)} lines);
+                  showing the file without a selection.
+                </div>
+              )}
+              <section className={styles.code} aria-label="File source">
+                <CodeView
+                  ref={codeViewRef}
+                  items={items}
+                  className={styles.codeView}
+                  options={options}
+                  selectedLines={sourceSelection}
+                  onScroll={(scrollTop) => rememberScroll('source', scrollTop)}
+                />
+              </section>
+            </>
+          )}
       </div>
     </div>
   );
