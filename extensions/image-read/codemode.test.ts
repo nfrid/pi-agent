@@ -20,10 +20,42 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import { PhotonImage } from '@silvia-odwyer/photon-node';
 import { expect, it } from 'vitest';
-import codemode from '../codemode';
+import codemode, { imageHash, nestedReadImageMappings } from '../codemode';
 import { createTaskStore, reconstruct } from '../tasks/store';
 import { registerTodoTool } from '../tasks/tool';
 import imageRead from './index';
+
+it('maps nested read images by final image ordinal only when forwarded', () => {
+  const blockA = { type: 'image', mimeType: 'image/png', data: 'base64-a' };
+  const blockB = { type: 'image', mimeType: 'image/jpeg', data: 'base64-b' };
+  const notForwarded = {
+    type: 'image',
+    mimeType: 'image/png',
+    data: 'base64-not-forwarded',
+  };
+  const hash = (block: unknown) => {
+    const value = imageHash(block);
+    if (!value) throw new Error('Expected an image block');
+    return value;
+  };
+  const reads = new Map([
+    ['compose/1', [hash(blockA)]],
+    ['compose/2', [hash(blockB)]],
+    ['compose/3', [hash(notForwarded)]],
+  ]);
+  const details = nestedReadImageMappings(reads, [
+    { type: 'text', text: 'before' },
+    blockB,
+    { type: 'text', text: 'between' },
+    blockA,
+    { type: 'text', text: 'after' },
+  ]);
+  expect(details).toEqual([
+    { toolCallId: 'compose/1', imageIndexes: [1] },
+    { toolCallId: 'compose/2', imageIndexes: [0] },
+  ]);
+  expect(JSON.stringify(details)).not.toContain('base64');
+});
 
 it('loads the local wrapper once while the builtin is disabled', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pi-codemode-loader-'));
@@ -265,6 +297,17 @@ it.each([
       { id: 'compose/1', name: 'todo_update', status: 'ok' },
       { id: 'compose/2', name: 'read', status: failedRead ? 'error' : 'ok' },
     ]);
+    if (failedRead) {
+      expect(parent.message.details).not.toHaveProperty('nestedReadImages');
+    } else {
+      expect(parent.message.details).toMatchObject({
+        nestedReadImages: [{ toolCallId: 'compose/2', imageIndexes: [0] }],
+      });
+      const nestedReadImages = (
+        parent.message.details as { nestedReadImages?: unknown } | undefined
+      )?.nestedReadImages;
+      expect(JSON.stringify(nestedReadImages)).not.toContain('data');
+    }
     const forwarded = contexts[1]?.messages.find(
       (message) => message.role === 'toolResult',
     );
