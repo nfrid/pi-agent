@@ -1159,6 +1159,56 @@ describe('dashboard domain reducers', () => {
     expect(projectTranscriptForRender(state).items).toEqual([]);
   });
 
+  it('restores only validated nested read images from parent content', () => {
+    const imageA = { type: 'image', data: 'ref-a', mimeType: 'image/png' };
+    const imageB = { type: 'image', data: 'ref-b', mimeType: 'image/jpeg' };
+    const entries = [
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 'root', name: 'codemode' }],
+        },
+      },
+      {
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          toolCallId: 'root',
+          toolName: 'codemode',
+          content: [imageA, imageB],
+          nestedCalls: {
+            calls: [
+              { id: 'root/1', name: 'read', status: 'ok' },
+              { id: 'root/2', name: 'read', status: 'ok' },
+              { id: 'other/1', name: 'read', status: 'ok' },
+            ],
+          },
+          details: {
+            nestedReadImages: [
+              { toolCallId: 'root/1', imageIndexes: [1] },
+              { toolCallId: 'root/2', imageIndexes: [0] },
+              { toolCallId: 'other/1', imageIndexes: [0] },
+              { toolCallId: 'root/3', imageIndexes: [0] },
+            ],
+          },
+        },
+      },
+    ];
+    const restored = hydrateTranscript(entries, 's');
+    expect(restored.items['root/1']).toMatchObject({
+      result: { content: [imageB] },
+    });
+    expect(restored.items['root/2']).toMatchObject({
+      result: { content: [imageA] },
+    });
+    expect(restored.items['root/3']).toBeUndefined();
+    const rendered = projectTranscriptForRender(restored).items;
+    expect(rendered.find((item) => item.key === 'root/1')).toMatchObject({
+      result: { content: [imageB] },
+    });
+  });
+
   it('keeps nested live calls with their parent and restores bounded metadata without inventing results', () => {
     const entries = [
       {
