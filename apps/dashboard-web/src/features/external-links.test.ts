@@ -30,7 +30,15 @@ describe('external link eligibility', () => {
   });
 
   it('accepts only unmodified, unprevented primary clicks', () => {
-    expect(ordinaryClick({ button: 0 } as MouseEvent)).toBe(true);
+    const click = {
+      button: 0,
+      defaultPrevented: false,
+      metaKey: false,
+      ctrlKey: false,
+      shiftKey: false,
+      altKey: false,
+    };
+    expect(ordinaryClick(click)).toBe(true);
     for (const event of [
       { button: 0, defaultPrevented: true },
       { button: 1 },
@@ -39,6 +47,6 @@ describe('external link eligibility', () => {
       { button: 0, shiftKey: true },
       { button: 0, altKey: true },
     ])
-      expect(ordinaryClick(event as MouseEvent)).toBe(false);
+      expect(ordinaryClick({ ...click, ...event })).toBe(false);
   });
 });

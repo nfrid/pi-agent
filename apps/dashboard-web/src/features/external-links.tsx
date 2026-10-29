@@ -25,7 +25,17 @@ export function externalWebUrl(
   }
 }
 
-export function ordinaryClick(event: MouseEvent): boolean {
+export function ordinaryClick(
+  event: Pick<
+    MouseEvent,
+    | 'defaultPrevented'
+    | 'button'
+    | 'metaKey'
+    | 'ctrlKey'
+    | 'shiftKey'
+    | 'altKey'
+  >,
+): boolean {
   return (
     !event.defaultPrevented &&
     event.button === 0 &&

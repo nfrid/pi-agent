@@ -147,9 +147,6 @@ test('installed local PWA opens ordinary external links natively and preserves o
 
   const usageLink = page.getByRole('link', { name: 'View usage in ChatGPT' });
   await expect(usageLink).toBeVisible();
-  await usageLink.evaluate((anchor) => {
-    anchor.id = 'usage';
-  });
   await usageLink.press('Enter');
   await expect.poll(() => requests.length).toBe(2);
   expect(requests[1]?.input).toMatchObject({
