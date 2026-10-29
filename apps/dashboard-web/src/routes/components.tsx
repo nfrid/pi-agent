@@ -46,7 +46,7 @@ export function ProjectRoute() {
   const { projectId } = useParams({ from: '/projects/$projectId' });
   const dashboard = useDashboardContext();
   return dashboard.snapshot ? (
-    <ProjectView id={projectId} snapshot={dashboard.snapshot} />
+    <ProjectView key={projectId} id={projectId} snapshot={dashboard.snapshot} />
   ) : null;
 }
 
