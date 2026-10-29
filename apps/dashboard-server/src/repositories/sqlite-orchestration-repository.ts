@@ -606,45 +606,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
   }
 
   createThread(input: CreateThreadInput): Thread {
-    const now = input.createdAt ?? input.updatedAt ?? Date.now();
-    const thread: Thread = {
-      id: input.id ?? randomUUID(),
-      projectId: input.projectId,
-      title: input.title,
-      ...(input.checkoutId === undefined
-        ? {}
-        : { checkoutId: input.checkoutId }),
-      ...(input.externalRef === undefined
-        ? {}
-        : { externalRef: input.externalRef }),
-      ...(input.isService ? { isService: true } : {}),
-      ...(input.archivedAt === undefined
-        ? {}
-        : { archivedAt: input.archivedAt }),
-      ...(input.pinnedAt === undefined ? {} : { pinnedAt: input.pinnedAt }),
-      status: input.status ?? 'draft',
-      createdAt: input.createdAt ?? now,
-      updatedAt: input.updatedAt ?? now,
-    };
-    this.db
-      .prepare(
-        `INSERT INTO thread (id,project_id,title,checkout_id,external_ref,is_service,status,archived_at,pinned_at,created_at,updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-      )
-      .run(
-        thread.id,
-        thread.projectId,
-        thread.title,
-        thread.checkoutId ?? null,
-        thread.externalRef ?? null,
-        thread.isService ? 1 : 0,
-        thread.status,
-        thread.archivedAt ?? null,
-        thread.pinnedAt ?? null,
-        thread.createdAt,
-        thread.updatedAt,
-      );
-    return thread;
+    return this.insertThread(input);
   }
 
   getThread(id: string): Thread | undefined {

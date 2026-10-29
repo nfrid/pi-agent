@@ -13,6 +13,7 @@ import type {
 } from '@pi-dashboard/protocol';
 import type { RefObject } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { visibleTranscriptAnchor } from './scroll-memory';
 
 export function sessionHistoryWindowKey(
   cursor: number | undefined,
@@ -72,21 +73,11 @@ type HistoryRequest = {
 };
 
 function captureScrollOffset(element: HTMLDivElement): ScrollAnchor {
-  const viewportTop = element.getBoundingClientRect().top;
-  const row = Array.from(
-    element.querySelectorAll<HTMLElement>(
-      '[data-transcript-key], [data-transcript-row]',
-    ),
-  ).find(
-    (candidate) => candidate.getBoundingClientRect().bottom >= viewportTop,
-  );
-  const rowKey = row?.dataset.transcriptKey ?? row?.dataset.transcriptRow;
+  const { rowKey, rowOffset } = visibleTranscriptAnchor(element);
   return {
     scrollTop: element.scrollTop,
     scrollHeight: element.scrollHeight,
-    ...(row && rowKey
-      ? { rowKey, rowTop: row.getBoundingClientRect().top - viewportTop }
-      : {}),
+    ...(rowKey ? { rowKey, rowTop: rowOffset } : {}),
   };
 }
 

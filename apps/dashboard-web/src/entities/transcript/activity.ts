@@ -1,7 +1,7 @@
 import {
   type ActivityLineChanges,
   type ActivityPhase,
-  activityToolDurationMs,
+  activityGroupFacts,
   activityToolLineChanges,
   backgroundPresentation,
   delegateGatePresentation,
@@ -432,24 +432,10 @@ export function toolStreamSummary(
 export function toolStreamMetadata(
   tools: readonly ActivityStepTool[],
 ): ToolStreamMetadata {
-  const lineChanges: ActivityLineChanges = {
-    added: 0,
-    changed: 0,
-    removed: 0,
-  };
-  let durationMs = 0;
-  for (const tool of tools) {
-    const changes = activityToolLineChanges(tool);
-    if (changes) {
-      lineChanges.added += changes.added;
-      lineChanges.changed += changes.changed;
-      lineChanges.removed += changes.removed;
-    }
-    durationMs += activityToolDurationMs(tool) ?? 0;
-  }
+  const { lineChanges, commandDurationMs } = activityGroupFacts(tools);
   return {
     lineChanges,
-    durationMs,
+    durationMs: commandDurationMs,
     failureCount: tools.filter(isFailedActivityTool).length,
   };
 }
