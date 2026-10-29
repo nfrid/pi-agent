@@ -2296,12 +2296,14 @@ test('command palette supports fuzzy keyboard search and surface handoff @deskto
     'Dashboard agent',
   );
   await search.press('End');
-  await expect(palette.getByRole('option', { selected: true })).toContainText(
-    'Projects',
+  await expect(palette.getByRole('option').last()).toHaveAttribute(
+    'aria-selected',
+    'true',
   );
   await search.press('ArrowDown');
-  await expect(palette.getByRole('option', { selected: true })).toContainText(
-    'Projects',
+  await expect(palette.getByRole('option').last()).toHaveAttribute(
+    'aria-selected',
+    'true',
   );
   await search.press('Home');
   await expect(palette.getByRole('option', { selected: true })).toContainText(
