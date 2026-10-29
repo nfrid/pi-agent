@@ -209,24 +209,32 @@ if CommandLine.arguments.contains("--self-test") {
     }
     private func command(_ message: [String: Any]) {
         guard let type = message["type"] as? String, let id = message["id"] as? String else { return }
-        if type == "status" { status(id); return }
-        if type == "openExternal", let value = message["url"] as? String {
+        switch type {
+        case "status":
+            status(id)
+        case "openExternal":
+            guard let value = message["url"] as? String else { return }
             let opened = openExternal(value) { NSWorkspace.shared.open($0) }
             send(["type": "status", "id": id, "permission": opened ? "opened" : "failed"])
+        case "click":
+            guard let url = message["url"] as? String else { return }
+            let accepted = click(url)
+            send(["type": "status", "id": id, "permission": accepted ? "diagnostic" : "invalidTarget"])
+        case "authorize":
+            center.requestAuthorization(options: [.alert]) { _, _ in
+                DispatchQueue.main.async { self.status(id) }
+            }
+        case "notify":
+            guard let payload = NotificationPayload(message) else { return }
+            let content = UNMutableNotificationContent()
+            content.title = payload.title
+            content.subtitle = payload.subtitle
+            content.body = payload.body
+            content.userInfo = ["url": payload.url]
+            center.add(UNNotificationRequest(identifier: payload.id, content: content, trigger: nil)) { _ in }
+        default:
             return
         }
-        if type == "click", let url = message["url"] as? String { let accepted = click(url); send(["type": "status", "id": id, "permission": accepted ? "diagnostic" : "invalidTarget"]); return }
-        if type == "authorize" {
-            center.requestAuthorization(options: [.alert]) { _, _ in DispatchQueue.main.async { self.status(id) } }
-            return
-        }
-        guard let payload = NotificationPayload(message) else { return }
-        let content = UNMutableNotificationContent()
-        content.title = payload.title
-        content.subtitle = payload.subtitle
-        content.body = payload.body
-        content.userInfo = ["url": payload.url]
-        center.add(UNNotificationRequest(identifier: payload.id, content: content, trigger: nil)) { _ in }
     }
     // The diagnostic and OS callbacks deliberately share this handler.
     @discardableResult private func click(_ value: String) -> Bool {

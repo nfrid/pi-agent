@@ -295,7 +295,14 @@ export class NativeNotifications {
     this.launch();
     const id = randomUUID();
     const permission = await new Promise<string>((resolve) => {
-      const message = `${JSON.stringify({ type: action === 'enable' ? 'authorize' : action === 'click' ? 'click' : action === 'openExternal' ? 'openExternal' : 'status', id, url })}\n`;
+      const type = {
+        status: 'status',
+        enable: 'authorize',
+        click: 'click',
+        openExternal: 'openExternal',
+        restore: 'status',
+      }[action];
+      const message = `${JSON.stringify({ type, id, url })}\n`;
       const onConnect = (socket: Socket) => socket.write(message);
       const finish = (permission: string) => {
         clearTimeout(timer);

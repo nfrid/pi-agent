@@ -150,6 +150,12 @@ it('requires enable, separates names, preserves fault meaning, and suppresses na
     ).toHaveLength(0);
     permission = 'authorized';
     expect((await native.control('enable')).enabled).toBe(true);
+    expect(
+      await native.control('openExternal', 'https://example.com/enabled'),
+    ).toMatchObject({ enabled: true, permission: 'opened' });
+    expect(
+      await native.control('openExternal', 'https://example.com/fail'),
+    ).toMatchObject({ enabled: true, permission: 'failed' });
     native.notify(event, presentation);
     await vi.waitFor(() =>
       expect(
@@ -198,6 +204,8 @@ it('requires enable, separates names, preserves fault meaning, and suppresses na
       expect(native.click()?.path).toBe('/sessions/thread%2Fone'),
     );
     const click = native.click();
+    await native.control('openExternal', 'https://example.com/pending');
+    expect(native.click()).toEqual(click);
     native.acknowledge('other');
     expect(native.click()).toEqual(click);
     native.acknowledge(click?.id ?? '');
