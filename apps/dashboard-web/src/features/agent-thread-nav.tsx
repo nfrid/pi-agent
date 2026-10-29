@@ -50,6 +50,7 @@ import {
   statusGlyph,
   statusLabel,
 } from './agent-thread-nav/model';
+import { useThreadShortcuts } from './agent-thread-nav/shortcuts';
 import {
   isThreadUnread,
   useAgentThreadUnread,
@@ -73,11 +74,7 @@ import {
   useModelDisplayPreferences,
 } from './model-display-preferences';
 import { draftModelSelection } from './model-option';
-import {
-  hasOpenDialog,
-  shortcutLabel,
-  useModifierShortcut,
-} from './modifier-shortcuts';
+import { shortcutLabel, useModifierShortcut } from './modifier-shortcuts';
 import { ProjectIcon } from './project-icon';
 import {
   AgentThreadActionMenu,
@@ -515,10 +512,6 @@ export function AgentThreadNav({
     media.addEventListener('change', update);
     return () => media.removeEventListener('change', update);
   }, []);
-  const [shortcutTargetIds, setShortcutTargetIds] = useState<readonly string[]>(
-    [],
-  );
-  const [shortcutHintsVisible, setShortcutHintsVisible] = useState(false);
   const [activeLimit, setActiveLimit] = useState(MAX_VISIBLE_ACTIVE_THREADS);
   const [projectScope, setProjectScope] = useState('all');
   const [archivedExpanded, setArchivedExpanded] = useState(() =>
@@ -538,12 +531,6 @@ export function AgentThreadNav({
   const [bulkError, setBulkError] = useState<string | undefined>(undefined);
   const modelDisplayPreferences = useModelDisplayPreferences();
   const selectionAnchorId = useRef<string | undefined>(undefined);
-  const displayedNavigationRowsRef = useRef<readonly AgentThreadRow[]>([]);
-  const shortcutTargetIdsRef = useRef<readonly string[]>([]);
-  const clearShortcutGestureRef = useRef<() => void>(() => undefined);
-  const selectRef = useRef<(id: string) => void>(() => undefined);
-  const surfacesRef = useRef(surfaces);
-  const selectionDisabledRef = useRef(false);
   useDrawerHistory(mode === 'session' && open, () => onOpenChange?.(false));
   const drafts = useDrafts();
   const draftPersistenceError = useDraftPersistenceError();
@@ -827,100 +814,11 @@ export function AgentThreadNav({
     go(row?.draft ? draftPath(id) : `/sessions/${encodeURIComponent(id)}`);
     if (mode === 'session') onOpenChange?.(false);
   };
-  displayedNavigationRowsRef.current = displayedNavigationRows;
-  selectRef.current = select;
-  surfacesRef.current = surfaces;
-  selectionDisabledRef.current = bulkPendingAction !== undefined;
-  useEffect(() => {
-    let revealTimer: number | undefined;
-    let exitTimer: number | undefined;
-    const clearShortcutGesture = (unmount = false) => {
-      shortcutTargetIdsRef.current = [];
-      if (revealTimer !== undefined) window.clearTimeout(revealTimer);
-      if (exitTimer !== undefined) window.clearTimeout(exitTimer);
-      revealTimer = undefined;
-      exitTimer = undefined;
-      if (unmount) return;
-      setShortcutHintsVisible(false);
-      exitTimer = window.setTimeout(() => setShortcutTargetIds([]), 140);
-    };
-    clearShortcutGestureRef.current = clearShortcutGesture;
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (
-        (event.key === 'Meta' ||
-          event.code === 'MetaLeft' ||
-          event.code === 'MetaRight') &&
-        !event.repeat
-      ) {
-        if (
-          selectionDisabledRef.current ||
-          surfacesRef.current?.stack.length ||
-          hasOpenDialog()
-        ) {
-          clearShortcutGesture();
-          return;
-        }
-        const targetIds = agentThreadShortcutTargetIds(
-          displayedNavigationRowsRef.current,
-        );
-        shortcutTargetIdsRef.current = targetIds;
-        setShortcutTargetIds(targetIds);
-        setShortcutHintsVisible(false);
-        if (revealTimer !== undefined) window.clearTimeout(revealTimer);
-        if (exitTimer !== undefined) window.clearTimeout(exitTimer);
-        if (targetIds.length)
-          revealTimer = window.setTimeout(
-            () => setShortcutHintsVisible(true),
-            80,
-          );
-        return;
-      }
-      if (
-        !event.metaKey ||
-        event.ctrlKey ||
-        event.altKey ||
-        event.shiftKey ||
-        selectionDisabledRef.current ||
-        surfacesRef.current?.stack.length ||
-        hasOpenDialog()
-      )
-        return;
-      const key = Number(event.key);
-      const targetId =
-        Number.isInteger(key) && key >= 1 && key <= 9
-          ? shortcutTargetIdsRef.current[key - 1]
-          : undefined;
-      if (!targetId) return;
-      event.preventDefault();
-      selectRef.current(targetId);
-    };
-    const onKeyUp = (event: globalThis.KeyboardEvent) => {
-      if (
-        event.key === 'Meta' ||
-        event.code === 'MetaLeft' ||
-        event.code === 'MetaRight'
-      )
-        clearShortcutGesture();
-    };
-    const onBlur = () => clearShortcutGesture();
-    const onVisibilityChange = () => clearShortcutGesture();
-    window.addEventListener('keydown', onKeyDown, true);
-    window.addEventListener('keyup', onKeyUp, true);
-    window.addEventListener('blur', onBlur);
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    return () => {
-      clearShortcutGesture(true);
-      clearShortcutGestureRef.current = () => undefined;
-      window.removeEventListener('keydown', onKeyDown, true);
-      window.removeEventListener('keyup', onKeyUp, true);
-      window.removeEventListener('blur', onBlur);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-    };
-  }, []);
-  useEffect(() => {
-    if (surfaces?.stack.length || bulkPendingAction !== undefined)
-      clearShortcutGestureRef.current();
-  }, [bulkPendingAction, surfaces?.stack.length]);
+  const { shortcutTargetIds, shortcutHintsVisible } = useThreadShortcuts({
+    getTargets: () => agentThreadShortcutTargetIds(displayedNavigationRows),
+    select,
+    blocked: Boolean(surfaces?.stack.length) || bulkPendingAction !== undefined,
+  });
   const handleThreadClick = (
     row: AgentThreadRow,
     event: MouseEvent<HTMLButtonElement>,

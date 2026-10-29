@@ -1202,6 +1202,16 @@ test('desktop project scope filters threads and starts project threads @desktop'
   await page.keyboard.up('Meta');
   await page.keyboard.down('Meta');
   await expect.poll(() => nav.locator('[data-shortcut-hint]').count()).toBe(2);
+  await page.keyboard.press('.');
+  await expect(settingsDialog).toBeVisible();
+  await expect(nav.locator('[data-shortcut-hint]')).toHaveCount(0);
+  await page.keyboard.press('1');
+  await expect(page).toHaveURL(/\/$/u);
+  await page.keyboard.up('Meta');
+  await page.keyboard.press('Escape');
+  await expect(settingsDialog).toHaveCount(0);
+  await page.keyboard.down('Meta');
+  await expect.poll(() => nav.locator('[data-shortcut-hint]').count()).toBe(2);
   await nav
     .getByRole('searchbox', { name: 'Search agents and threads' })
     .fill('One');
