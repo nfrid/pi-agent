@@ -75,10 +75,37 @@ describe('waitFor', () => {
     await expect(waitFor(Promise.resolve(), 10_000)).resolves.toBeUndefined();
   });
 
-  it('resolves immediately for a non-positive timeout', async () => {
-    await expect(
-      waitFor(new Promise<void>(() => {}), 0),
-    ).resolves.toBeUndefined();
+  it.each([
+    0, -1,
+  ])('resolves without waiting when the timeout is %i', async (timeoutMs) => {
+    vi.useFakeTimers();
+    try {
+      let settled = false;
+      void waitFor(new Promise<void>(() => {}), timeoutMs).then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits for the smallest positive timeout while work remains pending', async () => {
+    vi.useFakeTimers();
+    try {
+      let settled = false;
+      const observed = waitFor(new Promise<void>(() => {}), 1).then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await observed;
+      expect(settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rejects when the signal is already aborted', async () => {
