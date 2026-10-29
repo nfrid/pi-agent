@@ -6,6 +6,23 @@ let dashboardOrigin = "http://127.0.0.1:4174"
 let dashboardBundle = "com.google.Chrome.app.famamklipjamakjadikolcemgkfbbpek"
 let dashboardApp = URL(fileURLWithPath: "/Applications/Pi Dashboard.app")
 
+func externalURL(_ value: String) -> URL? {
+    guard value.utf8.count <= 2048,
+          !value.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }),
+          let components = URLComponents(string: value),
+          let scheme = components.scheme?.lowercased(), ["http", "https"].contains(scheme),
+          let host = components.host, !host.isEmpty,
+          components.user == nil, components.password == nil,
+          let url = components.url,
+          !(scheme == "http" && host.lowercased() == "127.0.0.1" && (components.port ?? 80) == 4174) else { return nil }
+    return url
+}
+
+@discardableResult func openExternal(_ value: String, opener: (URL) -> Bool) -> Bool {
+    guard let url = externalURL(value) else { return false }
+    return opener(url)
+}
+
 func clickPath(_ value: String) -> String? {
     guard let url = URLComponents(string: value), url.scheme == "http", url.host == "127.0.0.1", url.port == 4174,
           url.user == nil, url.password == nil, url.query == nil, url.fragment == nil else { return nil }
@@ -74,6 +91,20 @@ if CommandLine.arguments.contains("--self-test") {
     let payload = NotificationPayload(decoded)!
     precondition(payload.title == "Project · literal" && payload.subtitle == "Thread" && payload.body == "Plain preview")
     precondition(NotificationPayload(["type": "notify", "id": "bad", "url": "https://pi.nfrid.me/sessions/a"]) == nil)
+    var externalEffects: [String] = []
+    let external = "https://example.com/a"
+    precondition(openExternal(external) { externalEffects.append($0.absoluteString); return true })
+    precondition(externalEffects == [external])
+    externalEffects = []
+    precondition(!openExternal(external) { _ in externalEffects.append("opened"); return false })
+    precondition(externalEffects == ["opened"])
+    for invalid in [
+        dashboardOrigin, "http://user@example.com/", "http://@example.com/", "javascript:alert(1)",
+        "file:///tmp/a", "https://example.com/" + String(UnicodeScalar(10)!), String(repeating: "a", count: 2049)
+    ] {
+        precondition(!openExternal(invalid) { _ in externalEffects.append("invalid"); return true })
+    }
+    precondition(externalEffects == ["opened"])
     // Exercise the actual dispatcher with recorded effects, never real apps.
     let target = dashboardOrigin + "/sessions/a%2Fb"
     var effects: [String] = []
@@ -118,7 +149,7 @@ if CommandLine.arguments.contains("--self-test") {
             precondition(effects.isEmpty)
         }
     }
-    print("Native click, opening modes, and notification protocol validation passed")
+    print("Native click, external opening, and notification protocol validation passed")
     exit(0)
 }
 
@@ -179,6 +210,11 @@ if CommandLine.arguments.contains("--self-test") {
     private func command(_ message: [String: Any]) {
         guard let type = message["type"] as? String, let id = message["id"] as? String else { return }
         if type == "status" { status(id); return }
+        if type == "openExternal", let value = message["url"] as? String {
+            let opened = openExternal(value) { NSWorkspace.shared.open($0) }
+            send(["type": "status", "id": id, "permission": opened ? "opened" : "failed"])
+            return
+        }
         if type == "click", let url = message["url"] as? String { let accepted = click(url); send(["type": "status", "id": id, "permission": accepted ? "diagnostic" : "invalidTarget"]); return }
         if type == "authorize" {
             center.requestAuthorization(options: [.alert]) { _, _ in DispatchQueue.main.async { self.status(id) } }

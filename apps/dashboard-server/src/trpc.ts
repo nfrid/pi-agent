@@ -60,6 +60,7 @@ import type { SessionFeedRegistry, ShellFeed } from './live-feeds.js';
 import {
   type NativeNotifications,
   nativeClickPath,
+  nativeExternalUrl,
 } from './native-notifications.js';
 import {
   type DashboardTelemetry,
@@ -383,6 +384,26 @@ const dashboardRouter = t.router({
           ? () => ctx.removePushSubscription?.(endpoint)
           : undefined,
       );
+    }),
+  nativeOpenExternal: nativeProcedure
+    .input((value: unknown) => {
+      const input = value as { url?: unknown } | null;
+      if (
+        !input ||
+        typeof input.url !== 'string' ||
+        !nativeExternalUrl(input.url)
+      )
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Invalid external URL.',
+        });
+      return { url: input.url };
+    })
+    .mutation(async ({ ctx, input }) => {
+      const native = ctx.nativeNotifications?.();
+      if (!native) return { opened: false };
+      const result = await native.control('openExternal', input.url);
+      return { opened: result.permission === 'opened' };
     }),
   nativeClicks: nativeProcedure.subscription(async function* ({ ctx, signal }) {
     let previous: string | undefined;
