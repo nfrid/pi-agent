@@ -4,6 +4,11 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
+import {
+  parsePromptArguments,
+  replaceSkillReferences,
+  substitutePromptArguments,
+} from '@pi-dashboard/protocol/composer-text';
 import { DASHBOARD_SUPPORTED_BUILTIN_COMMANDS } from '@pi-dashboard/protocol/dashboard-api';
 import type { BridgeImageAttachment } from '@pi-dashboard/protocol/pi-runtime-protocol';
 import { requestRuntimePause, resumeRuntimePause } from '../pause/operations';
@@ -48,48 +53,6 @@ function stripFrontmatter(content: string): string {
   return content.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, '');
 }
 
-function parseArgs(value: string): string[] {
-  const args: string[] = [];
-  let current = '';
-  let quote: string | undefined;
-  for (const character of value) {
-    if (quote) {
-      if (character === quote) quote = undefined;
-      else current += character;
-    } else if (character === '"' || character === "'") quote = character;
-    else if (/\s/.test(character)) {
-      if (current) args.push(current);
-      current = '';
-    } else current += character;
-  }
-  if (current) args.push(current);
-  return args;
-}
-
-function substituteArgs(content: string, args: readonly string[]): string {
-  const all = args.join(' ');
-  return content.replace(
-    /\$\{(\d+|ARGUMENTS|@):-([^}]*)\}|\$\{@:(\d+)(?::(\d+))?\}|\$(ARGUMENTS|@|\d+)/g,
-    (_match, target, fallback, sliceStart, sliceLength, simple) => {
-      if (target) {
-        const value =
-          target === '@' || target === 'ARGUMENTS'
-            ? all
-            : args[Number(target) - 1];
-        return value || fallback;
-      }
-      if (sliceStart) {
-        const start = Math.max(0, Number(sliceStart) - 1);
-        return args
-          .slice(start, sliceLength ? start + Number(sliceLength) : undefined)
-          .join(' ');
-      }
-      if (simple === '@' || simple === 'ARGUMENTS') return all;
-      return args[Number(simple) - 1] ?? '';
-    },
-  );
-}
-
 function commandParts(
   text: string,
 ): { name: string; args: string } | undefined {
@@ -105,74 +68,6 @@ function skillBlock(command: CommandInfo, skill: string): string {
   return `<skill name="${skill}" location="${command.sourceInfo.path}">\nReferences are relative to ${baseDir}.\n\n${body}\n</skill>`;
 }
 
-function replaceSkillReferences(
-  text: string,
-  skills: ReadonlyMap<string, CommandInfo>,
-): { text: string; commands: CommandInfo[] } {
-  const selected: CommandInfo[] = [];
-  const seen = new Set<string>();
-  let fenced: '`' | '~' | undefined;
-  let inlineTicks = 0;
-  const rewritten = text
-    .split('\n')
-    .map((line) => {
-      const fence = line.match(/^\s*(`{3,}|~{3,})/u)?.[1];
-      if (fence) {
-        const marker = fence[0] as '`' | '~';
-        if (!fenced) fenced = marker;
-        else if (fenced === marker) fenced = undefined;
-        return line;
-      }
-      if (fenced) return line;
-      let result = '';
-      for (let index = 0; index < line.length; ) {
-        if (line[index] === '`') {
-          let end = index + 1;
-          while (line[end] === '`') end += 1;
-          const count = end - index;
-          if (inlineTicks === 0) inlineTicks = count;
-          else if (inlineTicks === count) inlineTicks = 0;
-          result += line.slice(index, end);
-          index = end;
-          continue;
-        }
-        if (
-          inlineTicks === 0 &&
-          line[index] === '$' &&
-          line[index - 1] !== '\\'
-        ) {
-          const candidate = line
-            .slice(index + 1)
-            .match(/^[a-z0-9]+(?:-[a-z0-9]+)*/u)?.[0];
-          const command = candidate ? skills.get(candidate) : undefined;
-          if (candidate && command) {
-            if (!seen.has(candidate)) {
-              seen.add(candidate);
-              selected.push(command);
-            }
-            result += candidate;
-            index += candidate.length + 1;
-            continue;
-          }
-        }
-        if (
-          inlineTicks === 0 &&
-          line[index] === '\\' &&
-          line[index + 1] === '$'
-        ) {
-          result += '$';
-          index += 2;
-          continue;
-        }
-        result += line[index];
-        index += 1;
-      }
-      return result;
-    })
-    .join('\n');
-  return { text: rewritten, commands: selected };
-}
-
 function expandInlineSkills(
   text: string,
   commands: readonly CommandInfo[],
@@ -185,8 +80,8 @@ function expandInlineSkills(
     ),
   );
   const expanded = replaceSkillReferences(text, skills);
-  if (expanded.commands.length === 0) return expanded.text;
-  const blocks = expanded.commands.map((command) =>
+  if (expanded.selected.length === 0) return expanded.text;
+  const blocks = expanded.selected.map((command) =>
     skillBlock(command, command.name.replace(/^skill:/u, '')),
   );
   return `${blocks.join('\n\n')}\n\n${expanded.text}`;
@@ -212,7 +107,7 @@ export function expandDashboardInput(
       const raw = readFileSync(command.sourceInfo.path, 'utf8');
       const body = stripFrontmatter(raw).trim();
       return expandInlineSkills(
-        substituteArgs(body, parseArgs(invocation.args)),
+        substitutePromptArguments(body, parsePromptArguments(invocation.args)),
         commands,
       );
     }

@@ -31,6 +31,10 @@ export default defineConfig({
         __dirname,
         '../../packages/activity-model/src/index.ts',
       ),
+      '@pi-dashboard/protocol/composer-text': path.resolve(
+        __dirname,
+        '../../packages/dashboard-protocol/src/composer-text.ts',
+      ),
       '@pi-dashboard/protocol/dashboard-api': path.resolve(
         __dirname,
         '../../packages/dashboard-protocol/src/dashboard-api.ts',

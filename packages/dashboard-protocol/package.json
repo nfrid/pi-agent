@@ -22,6 +22,10 @@
       "types": "./src/orchestration-parsers.ts",
       "default": "./dist/orchestration-parsers.js"
     },
+    "./composer-text": {
+      "types": "./src/composer-text.ts",
+      "default": "./dist/composer-text.js"
+    },
     "./dashboard-api": {
       "types": "./src/dashboard-api.ts",
       "default": "./dist/dashboard-api.js"

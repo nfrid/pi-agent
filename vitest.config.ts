@@ -20,6 +20,9 @@ export default defineConfig({
       '@pi-dashboard/protocol/pi-runtime-protocol': path.resolve(
         'packages/dashboard-protocol/src/pi-runtime-protocol.ts',
       ),
+      '@pi-dashboard/protocol/composer-text': path.resolve(
+        'packages/dashboard-protocol/src/composer-text.ts',
+      ),
       '@pi-dashboard/protocol/dashboard-api': path.resolve(
         'packages/dashboard-protocol/src/dashboard-api.ts',
       ),
