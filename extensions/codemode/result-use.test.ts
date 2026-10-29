@@ -30,6 +30,7 @@ function sandbox(tool: ToolDefinition, respond: (args: unknown) => unknown) {
     data: { set: Record<string, unknown>; delete: string[] };
   }> = [];
   codemode({
+    on: () => () => {},
     registerTool: (registered: ToolDefinition) => {
       definition = registered;
     },

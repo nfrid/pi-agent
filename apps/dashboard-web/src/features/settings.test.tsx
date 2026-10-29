@@ -37,10 +37,9 @@ describe('settings drawer', () => {
       </QueryClientProvider>,
     );
     expect(markup).toContain('Alert delivery');
-    expect(markup).toContain('Browser push');
+    expect(markup).toContain('Notifications');
     expect(markup).toContain('Enable push');
     expect(markup).not.toContain('Read all');
-    expect(markup).not.toContain('Notifications');
     expect(markup).not.toContain('Browser alerts');
     expect(markup).toContain('Transcript');
     expect(markup).toContain('Steps shown from start');
