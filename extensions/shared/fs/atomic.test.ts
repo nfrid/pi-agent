@@ -10,7 +10,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { chmod, open, readFile } from 'node:fs/promises';
+import { chmod, open, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -196,6 +196,38 @@ describe('atomic writes', () => {
     await expect(atomicWriteFile(file, 'replacement')).rejects.toBe(failure);
     expect(readFileSync(file, 'utf8')).toBe('previous');
     expect(readdirSync(root)).toEqual(['record']);
+  });
+
+  it('preserves the publication error when asynchronous cleanup also fails', async () => {
+    const file = path.join(tempRoot(), 'record');
+    const failure = new Error('original sync failure');
+    const actual =
+      await vi.importActual<typeof import('node:fs/promises')>(
+        'node:fs/promises',
+      );
+    vi.mocked(open).mockImplementationOnce(async (...args) => {
+      const handle = await actual.open(...args);
+      vi.spyOn(handle, 'sync').mockRejectedValueOnce(failure);
+      return handle;
+    });
+    vi.mocked(rm).mockRejectedValueOnce(new Error('cleanup denied'));
+    await expect(atomicWriteFile(file, 'replacement')).rejects.toBe(failure);
+  });
+
+  it('preserves the sync error when the scratch has already disappeared', async () => {
+    const file = path.join(tempRoot(), 'record');
+    const failure = new Error('original sync failure');
+    const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+    let scratch = '';
+    vi.mocked(openSync).mockImplementationOnce((temporary, flags, mode) => {
+      scratch = String(temporary);
+      return actual.openSync(temporary, flags, mode);
+    });
+    vi.mocked(fsyncSync).mockImplementationOnce(() => {
+      rmSync(scratch);
+      throw failure;
+    });
+    expect(() => atomicWriteFileSync(file, 'replacement')).toThrow(failure);
   });
 
   it('does not remove an unowned scratch when synchronous open fails', () => {
