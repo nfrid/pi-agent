@@ -165,6 +165,35 @@ describe('transcript work-log row plan', () => {
     });
   });
 
+  it('counts a loaded boundary once when persisted and live aliases are identical', () => {
+    const rows = buildVirtualTranscriptRows([
+      item('request', 'user'),
+      item('work', 'assistant'),
+      item('answer', 'assistant', {
+        workLogClosure: {
+          requestMessageId: 'request',
+          liveRequestMessageId: 'request',
+          finalMessageId: 'answer',
+          liveFinalMessageId: 'answer',
+          startedAt: 1,
+          endedAt: 2,
+        },
+      }),
+    ]);
+    expect(rows.map((row) => row.kind)).toEqual(['entry', 'work-log', 'entry']);
+  });
+
+  it.each([
+    'request',
+    'answer',
+  ])('does not fold ambiguous duplicate %s entries', (key) => {
+    const rows = buildVirtualTranscriptRows([
+      ...items,
+      item(key, key === 'request' ? 'user' : 'assistant'),
+    ]);
+    expect(rows.some((row) => row.kind === 'work-log')).toBe(false);
+  });
+
   it('marks only adjacent retained replies inside one collapsed closure', () => {
     const rows = buildVirtualTranscriptRows([
       item('request', 'user'),

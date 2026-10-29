@@ -1,5 +1,8 @@
 import { toolBaseName } from '@pi-dashboard/activity-model';
-import type { SessionBranchTopology } from '@pi-dashboard/protocol';
+import type {
+  SessionBranchTopology,
+  SessionOutlineLandmark,
+} from '@pi-dashboard/protocol';
 import type { TranscriptModelItem } from '../../transcript';
 
 export type TranscriptToolStreamRange = {
@@ -178,48 +181,34 @@ export function isNewWorkLogClosureAppend(
   return finalIndex >= 0;
 }
 
-/** Build the authoritative flat row plan for regular and virtual rendering. */
-export function buildVirtualTranscriptRows(
+type WorkLogOptions = {
+  outline?: readonly SessionOutlineLandmark[];
+  historyStart?: number;
+};
+
+type WorkLogCandidate = {
+  closure: NonNullable<ToolStreamItem['workLogClosure']>;
+  requestIndex: number;
+  finalIndex: number;
+  requestOrdinal?: number;
+  requestId?: string;
+  partial: boolean;
+};
+function workLogCandidates(
   items: readonly ToolStreamItem[],
-  open: ReadonlySet<string> = new Set(),
-  options: {
-    outline?: readonly import('@pi-dashboard/protocol').SessionOutlineLandmark[];
-    historyStart?: number;
-  } = {},
-): VirtualTranscriptRow[] {
-  const streams = buildTranscriptToolStreams(items);
-  const streamByStart = new Map(
-    streams.map((stream) => [stream.start, stream]),
-  );
-  const streamIndexes = new Uint8Array(items.length);
-  for (const stream of streams)
-    for (let index = stream.start; index <= stream.end; index += 1)
-      streamIndexes[index] = 1;
-
-  const result: VirtualTranscriptRow[] = [];
-  for (let index = 0; index < items.length; index += 1) {
-    const stream = streamByStart.get(index);
-    if (stream) {
-      result.push({ kind: 'tool-stream', ...stream });
-      continue;
-    }
-    if (!streamIndexes[index])
-      result.push({
-        kind: 'entry',
-        key: items[index]?.key ?? `entry-${index}`,
-        index,
-      });
+  options: WorkLogOptions,
+): WorkLogCandidate[] {
+  const indexed = items.map((candidate, index) => ({ candidate, index }));
+  const byKey = new Map<string, typeof indexed>();
+  for (const entry of indexed) {
+    const matches = byKey.get(entry.candidate.key);
+    if (matches) matches.push(entry);
+    else byKey.set(entry.candidate.key, [entry]);
   }
-
-  type WorkLogCandidate = {
-    closure: NonNullable<ToolStreamItem['workLogClosure']>;
-    requestIndex: number;
-    finalIndex: number;
-    requestOrdinal?: number;
-    requestId?: string;
-    partial: boolean;
-  };
-  const candidates = items.flatMap<WorkLogCandidate>((item) => {
+  // Alias IDs may coincide, but duplicate entries must remain ambiguous.
+  const matching = (ids: readonly string[]) =>
+    [...new Set(ids)].flatMap((id) => byKey.get(id) ?? []);
+  return items.flatMap<WorkLogCandidate>((item) => {
     const closure = item.workLogClosure;
     if (!closure) return [];
     const requestIds = [
@@ -238,12 +227,8 @@ export function buildVirtualTranscriptRows(
       closure.endedAt < closure.startedAt
     )
       return [];
-    const requests = items.flatMap((candidate, index) =>
-      requestIds.includes(candidate.key) ? [{ candidate, index }] : [],
-    );
-    const finals = items.flatMap((candidate, index) =>
-      finalIds.includes(candidate.key) ? [{ candidate, index }] : [],
-    );
+    const requests = matching(requestIds);
+    const finals = matching(finalIds);
     if (finals.length !== 1 || finals[0]?.candidate.role !== 'assistant')
       return [];
     const finalIndex = finals[0].index;
@@ -305,6 +290,39 @@ export function buildVirtualTranscriptRows(
       return [];
     return [{ closure, requestIndex, finalIndex, partial: false }];
   });
+}
+
+/** Build the authoritative flat row plan for regular and virtual rendering. */
+export function buildVirtualTranscriptRows(
+  items: readonly ToolStreamItem[],
+  open: ReadonlySet<string> = new Set(),
+  options: WorkLogOptions = {},
+): VirtualTranscriptRow[] {
+  const streams = buildTranscriptToolStreams(items);
+  const streamByStart = new Map(
+    streams.map((stream) => [stream.start, stream]),
+  );
+  const streamIndexes = new Uint8Array(items.length);
+  for (const stream of streams)
+    for (let index = stream.start; index <= stream.end; index += 1)
+      streamIndexes[index] = 1;
+
+  const result: VirtualTranscriptRow[] = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const stream = streamByStart.get(index);
+    if (stream) {
+      result.push({ kind: 'tool-stream', ...stream });
+      continue;
+    }
+    if (!streamIndexes[index])
+      result.push({
+        kind: 'entry',
+        key: items[index]?.key ?? `entry-${index}`,
+        index,
+      });
+  }
+
+  const candidates = workLogCandidates(items, options);
   const overlaps = (
     left: WorkLogCandidate,
     right: WorkLogCandidate,
