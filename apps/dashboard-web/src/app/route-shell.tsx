@@ -7,6 +7,7 @@ import {
   useDashboardSurfaces,
 } from '../features/dashboard-surface-context';
 import { DraftPromotionLifecycle } from '../features/draft-promotion-lifecycle';
+import { ExternalLinkOpener } from '../features/external-links';
 import { FileViewerProvider } from '../features/file-viewer/context';
 import { NativeClickNavigation } from '../features/native-notifications';
 import { Header } from '../features/navigation';
@@ -83,6 +84,7 @@ export function RouteShell() {
       <DraftPromotionLifecycle snapshot={dashboard.snapshot} />
       <PushForegroundPresence pathname={routeState.pathname} />
       <NativeClickNavigation />
+      <ExternalLinkOpener />
       <DashboardSurfaceProvider
         blocked={false}
         locationKey={routeState.pathname}

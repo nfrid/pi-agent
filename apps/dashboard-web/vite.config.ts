@@ -58,7 +58,12 @@ function isNativeRequest(requestUrl: string | undefined): boolean {
   try {
     return decodeURIComponent(path.slice('/trpc/'.length))
       .split(',')
-      .some((name) => name === 'nativeControl' || name === 'nativeClicks');
+      .some(
+        (name) =>
+          name === 'nativeControl' ||
+          name === 'nativeClicks' ||
+          name === 'nativeOpenExternal',
+      );
   } catch {
     return false;
   }
