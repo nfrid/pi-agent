@@ -46,26 +46,26 @@ describe('fresh worktree ownership', () => {
       deleteWorktreeRecord: (id) => records.delete(id),
     });
     const nativeGit = gitCommands.git;
-    let scanned = 0;
-    let releaseScans = () => {};
-    const scansComplete = new Promise<void>((resolve) => {
-      releaseScans = resolve;
+    let queued = 0;
+    let releaseAdds = () => {};
+    const addsReady = new Promise<void>((resolve) => {
+      releaseAdds = resolve;
     });
     const spy = vi
       .spyOn(gitCommands, 'git')
       .mockImplementation(async (cwd, args, options) => {
-        const result = await nativeGit(cwd, args, options);
-        if (args[0] === 'for-each-ref') {
-          if (++scanned === 2) releaseScans();
-          await scansComplete;
+        if (args[0] === 'worktree' && args[1] === 'add') {
+          if (++queued === 2) releaseAdds();
+          await addsReady;
         }
-        return result;
+        return nativeGit(cwd, args, options);
       });
     try {
       const results = await Promise.all([
         creator.prepareWorktree({ cwd: root, name: 'same-name', base: 'head' }),
         creator.prepareWorktree({ cwd: root, name: 'same-name', base: 'head' }),
       ]);
+      expect(queued).toBe(2);
       for (const result of results) {
         if (!result.worktree) continue;
         const { record } = result.worktree;
