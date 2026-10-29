@@ -97,16 +97,17 @@ followed by at most 240 characters of detail. Browser and in-app titles are
 unchanged. Foreground suppression uses the same 30-second lease, refreshed every
 10 seconds, with at most 32 tabs per recipient, even after Web Push unsubscribe.
 
-Clicking sends one pending navigation to the authenticated local PWA and
-activates the exact installed bundle through `NSWorkspace.openApplication`.
+In `chrome-pwa` mode, clicking sends one pending navigation to the authenticated
+local PWA and activates the exact installed bundle through
+`NSWorkspace.openApplication`.
 The PWA uses its SPA router for `/sessions/<encoded-session-id>`,
 `/runtimes/<encoded-runtime-id>`, or the home fallback `/`.
 The pending click expires after 60 seconds and the PWA acknowledges it after
 navigation. The same path handles a cold helper launch by macOS; the helper
-remembers only its socket path in its own UserDefaults. The API must be running
+remembers its socket path in its own UserDefaults. The API must be running
 and the installed PWA must load the new bundle. Vite's same-origin proxy keeps
-the exact `http://127.0.0.1:4174` Origin on native control, click-stream, and
-foreground requests. Originless EventSource GETs require that exact PWA Referer.
+the exact `http://127.0.0.1:4174` Origin on native control, external-opening,
+click-stream, and foreground requests. Originless EventSource GETs require that exact PWA Referer.
 The API still validates each native tRPC procedure, including procedures in a
 batch. This design does not depend on
 Chrome launch flags, app-shim argument forwarding, manifest launch defaults,
@@ -163,6 +164,29 @@ without fallback, direct browser opening without a PWA/socket event, opener
 failure, unknown modes, and rejected URLs before any side effects. It neither
 launches a browser nor modifies preferences or requests OS permission.
 
+### External links from the local PWA
+
+When the helper is available, ordinary clicks and keyboard activation of external
+HTTP/HTTPS links in the installed local PWA open through the macOS default
+browser. This includes transcript Markdown links and the account usage link.
+It is independent of `dashboardOpenMode` and does not require enabling native
+notifications or granting notification permission. The helper must be installed
+and the Dashboard API must be running.
+
+Internal dashboard navigation and file-viewer links stay in the PWA. Modified
+clicks, middle clicks, downloads, and browser context-menu actions keep their
+normal Chrome behavior. Ordinary browser tabs, public HTTPS clients, and phones
+keep normal link behavior. If the helper is unavailable when the PWA loads,
+links also retain their normal behavior. If an opening request fails, the PWA
+shows an explicit link to open the destination in Chrome instead of attempting
+an asynchronous popup that the browser might block.
+
+External opening uses a separate authenticated local-origin API command and
+helper command. It accepts only absolute HTTP/HTTPS destinations outside the
+local dashboard origin, without credentials or control characters. It does not
+relax the notification-click allowlist, change the system default browser, or
+pass destinations to a shell.
+
 ### Parent-owned live verification
 
 After installation and dashboard-only deployment, set `API_ORIGIN` to the
@@ -187,6 +211,14 @@ PWA stays on its previous route. Also check a fresh browser profile: the token
 prompt must preserve the deep link after authentication. Repeat a real click
 with a cold helper launch. A browser-mode `diagnostic` response reports only
 that LaunchServices accepted the URL, not successful authentication or loading.
+Also click a transcript web link and the account usage link in the local PWA.
+Verify that each opens in the system default browser without a new Chrome tab,
+including with native notifications disabled. Check keyboard activation,
+internal navigation, and file-viewer links. With the helper unavailable at page
+load, verify ordinary Chrome link behavior; after an opening failure, verify the
+explicit Chrome fallback link. Check ordinary browser tabs retain their normal
+behavior.
+
 Neither build/tests nor the diagnostic response prove OS focus or notification
 permission. These live checks remain deployment gates.
 
