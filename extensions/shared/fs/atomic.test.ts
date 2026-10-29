@@ -1,8 +1,19 @@
-import { mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import {
+  chmodSync,
+  existsSync,
+  fsyncSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { chmod, open, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   atomicWriteFile,
   atomicWriteFileSync,
@@ -10,7 +21,14 @@ import {
   atomicWriteJsonSync,
 } from './atomic';
 
+vi.mock('node:fs', { spy: true });
+vi.mock('node:fs/promises', { spy: true });
+
 const roots: string[] = [];
+const writers = [
+  { name: 'async', write: atomicWriteFile },
+  { name: 'sync', write: atomicWriteFileSync },
+];
 
 function tempRoot(): string {
   const root = mkdtempSync(path.join(tmpdir(), 'atomic-'));
@@ -19,6 +37,9 @@ function tempRoot(): string {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
+  vi.resetAllMocks();
+  for (const root of roots) rmSync(root, { recursive: true, force: true });
   roots.length = 0;
 });
 
@@ -105,12 +126,135 @@ describe('atomic writes', () => {
     expect(readdirSync(root)).toEqual(['record.json']);
   });
 
-  it('cleans up the temporary file when publication fails', () => {
+  it.each(writers)('$name cleans up when publication fails', async ({
+    write,
+  }) => {
     const root = tempRoot();
     // A directory occupying the target path makes rename fail.
     const file = path.join(root, 'occupied');
     atomicWriteFileSync(path.join(file, 'child.txt'), 'x');
-    expect(() => atomicWriteFileSync(file, 'replacement')).toThrow();
+    await expect(
+      Promise.resolve().then(() => write(file, 'replacement')),
+    ).rejects.toThrow();
     expect(readdirSync(root)).toEqual(['occupied']);
+  });
+
+  it.each(writers)('$name honors an explicit zero file mode', async ({
+    write,
+  }) => {
+    const file = path.join(tempRoot(), 'record');
+    await write(file, 'bytes', { mode: 0 });
+    expect(statSync(file).mode & 0o777).toBe(0);
+  });
+
+  it.each(writers)('$name honors an explicit zero directory mode', async ({
+    write,
+  }) => {
+    const directory = path.join(tempRoot(), 'restricted');
+    let mode: number | undefined;
+    try {
+      await write(path.join(directory, 'record'), 'bytes', { dirMode: 0 });
+    } catch (error) {
+      // A non-root writer cannot write into a directory without permissions.
+      expect(error).toMatchObject({ code: 'EACCES' });
+    } finally {
+      if (existsSync(directory)) {
+        mode = statSync(directory).mode & 0o777;
+        chmodSync(directory, 0o700);
+      }
+    }
+    expect(mode).toBe(0);
+  });
+
+  it('cleans up after synchronous fsync failure without changing the target', () => {
+    const root = tempRoot();
+    const file = path.join(root, 'record');
+    writeFileSync(file, 'previous');
+    const failure = new Error('ENOSPC');
+    vi.mocked(fsyncSync).mockImplementationOnce(() => {
+      throw failure;
+    });
+    expect(() => atomicWriteFileSync(file, 'replacement')).toThrow(failure);
+    expect(readFileSync(file, 'utf8')).toBe('previous');
+    expect(readdirSync(root)).toEqual(['record']);
+  });
+
+  it('cleans up after asynchronous sync failure without changing the target', async () => {
+    const root = tempRoot();
+    const file = path.join(root, 'record');
+    writeFileSync(file, 'previous');
+    const failure = new Error('ENOSPC');
+    const actual =
+      await vi.importActual<typeof import('node:fs/promises')>(
+        'node:fs/promises',
+      );
+    vi.mocked(open).mockImplementationOnce(async (...args) => {
+      const handle = await actual.open(...args);
+      vi.spyOn(handle, 'sync').mockRejectedValueOnce(failure);
+      return handle;
+    });
+    await expect(atomicWriteFile(file, 'replacement')).rejects.toBe(failure);
+    expect(readFileSync(file, 'utf8')).toBe('previous');
+    expect(readdirSync(root)).toEqual(['record']);
+  });
+
+  it('does not remove an unowned scratch when synchronous open fails', () => {
+    const file = path.join(tempRoot(), 'record');
+    let scratch = '';
+    vi.mocked(openSync).mockImplementationOnce((temporary) => {
+      scratch = String(temporary);
+      writeFileSync(temporary, 'other writer');
+      throw new Error('EEXIST');
+    });
+    expect(() => atomicWriteFileSync(file, 'replacement')).toThrow('EEXIST');
+    expect(readFileSync(scratch, 'utf8')).toBe('other writer');
+  });
+
+  it('does not remove an unowned scratch when asynchronous open fails', async () => {
+    const file = path.join(tempRoot(), 'record');
+    let scratch = '';
+    vi.mocked(open).mockImplementationOnce(async (temporary) => {
+      scratch = String(temporary);
+      writeFileSync(temporary, 'other writer');
+      throw new Error('EEXIST');
+    });
+    await expect(atomicWriteFile(file, 'replacement')).rejects.toThrow(
+      'EEXIST',
+    );
+    expect(readFileSync(scratch, 'utf8')).toBe('other writer');
+  });
+
+  it('keeps the permissions of the last published payload', async () => {
+    const file = path.join(tempRoot(), 'record');
+    const actual =
+      await vi.importActual<typeof import('node:fs/promises')>(
+        'node:fs/promises',
+      );
+    let arrived = () => {};
+    let release = () => {};
+    const paused = new Promise<void>((resolve) => {
+      arrived = resolve;
+    });
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(chmod).mockImplementation(async (target, mode) => {
+      if (String(target) === file && mode === 0o644) {
+        arrived();
+        await released;
+      }
+      return actual.chmod(target, mode);
+    });
+    const first = atomicWriteFile(file, 'public', { mode: 0o644 });
+    try {
+      // The fixed writer may finish without touching the shared path again.
+      await Promise.race([paused, first]);
+      await atomicWriteFile(file, 'private', { mode: 0o600 });
+    } finally {
+      release();
+      await first;
+    }
+    expect(readFileSync(file, 'utf8')).toBe('private');
+    expect(statSync(file).mode & 0o777).toBe(0o600);
   });
 });

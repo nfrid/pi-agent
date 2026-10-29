@@ -76,19 +76,19 @@ export async function atomicWriteFile(
   const temporary = temporaryPath(file);
   const descriptor = await open(temporary, 'wx', mode);
   try {
-    await descriptor.writeFile(bytes);
-    await descriptor.sync();
-  } finally {
-    await descriptor.close();
-  }
-  try {
+    try {
+      await descriptor.writeFile(bytes);
+      await descriptor.sync();
+    } finally {
+      await descriptor.close();
+    }
     await chmod(temporary, mode);
+    // Publication ends at rename. The target can belong to another writer next.
     await rename(temporary, file);
   } catch (error) {
     await rm(temporary, { force: true }).catch(() => undefined);
     throw error;
   }
-  await chmod(file, mode);
 }
 
 /** Atomically replace `file` with newline-terminated JSON. */
@@ -119,12 +119,12 @@ export function atomicWriteFileSync(
   const temporary = temporaryPath(file);
   const descriptor = openSync(temporary, 'wx', mode);
   try {
-    writeFileSync(descriptor, bytes);
-    fsyncSync(descriptor);
-  } finally {
-    closeSync(descriptor);
-  }
-  try {
+    try {
+      writeFileSync(descriptor, bytes);
+      fsyncSync(descriptor);
+    } finally {
+      closeSync(descriptor);
+    }
     renameSync(temporary, file);
   } catch (error) {
     rmSync(temporary, { force: true });
