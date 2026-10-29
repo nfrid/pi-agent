@@ -132,6 +132,16 @@ describe('waitFor', () => {
     );
   });
 
+  it.each([
+    undefined,
+    null,
+    false,
+    0,
+    '',
+  ])('preserves the rejection reason %j', async (reason) => {
+    await expect(waitFor(Promise.reject(reason), 10_000)).rejects.toBe(reason);
+  });
+
   it('removes its abort listener once settled', async () => {
     const controller = new AbortController();
     const remove = vi.spyOn(controller.signal, 'removeEventListener');

@@ -40,20 +40,20 @@ export function waitFor(
 
   return new Promise((resolve, reject) => {
     let finished = false;
-    const finish = (error?: unknown) => {
+    const finish = (settle: () => void) => {
       if (finished) return;
       finished = true;
       clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
-      if (error) reject(error);
-      else resolve();
+      settle();
     };
-    const timer = setTimeout(finish, timeoutMs);
-    const onAbort = () => finish(abortError(signal as AbortSignal));
+    const timer = setTimeout(() => finish(resolve), timeoutMs);
+    const onAbort = () =>
+      finish(() => reject(abortError(signal as AbortSignal)));
     signal?.addEventListener('abort', onAbort, { once: true });
     promise.then(
-      () => finish(),
-      (error: unknown) => finish(error),
+      () => finish(resolve),
+      (error: unknown) => finish(() => reject(error)),
     );
   });
 }
