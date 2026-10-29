@@ -126,6 +126,12 @@ export function snapshotGuidance(record: WorktreeRecord): string {
 }
 
 export function formatBranchDetail({ record, state }: BranchEntry): string {
+  if (record.status === 'preparing')
+    return [
+      'Worktree setup is incomplete. It may be interrupted or still preparing; do not launch or integrate it.',
+      `Worktree: ${bounded(record.worktreePath, MAX_DETAIL_FIELD_CHARS)}`,
+      `Cleanup after the creating process stops: /delegate-worktrees ${record.id} drop`,
+    ].join('\n');
   if (record.snapshot) return snapshotGuidance(record);
   return [
     record.ownership === 'caller'

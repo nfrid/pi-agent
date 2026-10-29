@@ -27,6 +27,7 @@ import type {
   WorktreePreparation,
   WorktreeRecord,
 } from './model.js';
+import { assertWorktreePrepared } from './model.js';
 import type { WorktreeStore } from './store.js';
 
 /** Worktrees live beside the repository so `git worktree list` reads naturally. */
@@ -247,31 +248,6 @@ function excludeWorktreeDir(repositoryRoot: string): void {
   } catch {
     // A missing or read-only .git/info is not worth failing preparation over;
     // the worktree still works, it just shows up as untracked.
-  }
-}
-
-async function uniqueBranch(
-  repositoryRoot: string,
-  base: string,
-  signal?: AbortSignal,
-): Promise<string> {
-  abortIfRequested(signal);
-  const existing = new Set(
-    splitZ(
-      String(
-        await git(
-          repositoryRoot,
-          ['for-each-ref', '--format=%(refname:short)%00', 'refs/heads'],
-          { signal },
-        ),
-      ),
-    ),
-  );
-  const candidate = `${BRANCH_PREFIX}/${base}`;
-  if (!existing.has(candidate)) return candidate;
-  for (let suffix = 2; ; suffix++) {
-    const next = `${candidate}-${suffix}`;
-    if (!existing.has(next)) return next;
   }
 }
 
@@ -774,8 +750,11 @@ export function createWorktreeCreator<
     const base = baseRef === undefined ? (options.base ?? 'wip') : 'head';
     const canonicalCwd = canonical(options.cwd);
     const workingDirectory = path.relative(root, canonicalCwd);
-    let worktreePath: string | undefined;
-    let branch: string | undefined;
+    // The record ID owns both names. Same-name callers never share a checkout
+    // or a ref, including while one of them rolls back a failed setup.
+    const branch = `${BRANCH_PREFIX}/${slugify(options.name)}-${id}`;
+    const worktreePath = path.join(root, WORKTREE_DIR, path.basename(branch));
+    let preparingRecord: Record | undefined;
 
     try {
       const baseHead = await gitText(
@@ -790,15 +769,25 @@ export function createWorktreeCreator<
             ],
         { signal: options.signal },
       );
-      branch = await uniqueBranch(root, slugify(options.name), options.signal);
-      worktreePath = path.join(root, WORKTREE_DIR, path.basename(branch));
-      if (existsSync(worktreePath))
-        worktreePath = path.join(
-          root,
-          WORKTREE_DIR,
-          `${path.basename(branch)}-${id.slice(0, 8)}`,
-        );
-
+      const now = new Date().toISOString();
+      const record = {
+        version: 1 as const,
+        id,
+        repositoryRoot: root,
+        worktreePath,
+        workingDirectory,
+        branch,
+        baseHead,
+        base,
+        ...(baseRef ? { baseRef } : {}),
+        carriedWip: false,
+        status: 'preparing' as const,
+        createdAt: now,
+        updatedAt: now,
+      } as Record;
+      // Publish ownership before Git can leave resources behind on a crash.
+      store.writeWorktreeRecord(record);
+      preparingRecord = record;
       excludeWorktreeDir(root);
       mkdirSync(path.dirname(worktreePath), { recursive: true });
       // Do not override core.hooksPath: `worktree add` must honor the
@@ -820,27 +809,24 @@ export function createWorktreeCreator<
             )
           : undefined;
       abortIfRequested(options.signal);
-      const now = new Date().toISOString();
-      const record = {
-        version: 1 as const,
-        id,
-        repositoryRoot: root,
-        worktreePath,
-        workingDirectory,
-        branch,
-        baseHead,
-        base,
-        ...(baseRef ? { baseRef } : {}),
-        carriedWip: Boolean(carryCommit),
-        ...(carryCommit ? { carryCommit } : {}),
-        status: 'active' as const,
-        createdAt: now,
-        updatedAt: now,
-      } as Record;
-      store.writeWorktreeRecord(record);
+      record.carriedWip = Boolean(carryCommit);
+      if (carryCommit) record.carryCommit = carryCommit;
+      activateRecord(record);
       return { worktree: { record, env: environment(id) } };
     } catch (error) {
-      await cleanupFailedPreparation(root, worktreePath, branch);
+      if (preparingRecord) {
+        preparingRecord.status = 'preparing';
+        const cleaned = await cleanupFailedPreparation(
+          root,
+          worktreePath,
+          branch,
+        );
+        if (cleaned) store.deleteWorktreeRecord(id);
+        else
+          return {
+            fallbackReason: `${setupFailure(error)} Incomplete worktree ${id} was retained for explicit cleanup.`,
+          };
+      }
       return { fallbackReason: setupFailure(error) };
     }
   }
@@ -852,6 +838,7 @@ export function createWorktreeCreator<
     abortIfRequested(options.signal);
     if (record.status === 'removed')
       throw new Error('This worktree has already been removed.');
+    assertWorktreePrepared(record);
     if (record.ownership === 'caller' && !existsSync(record.worktreePath))
       throw new Error(
         'This caller-owned worktree is unavailable and will not be recreated by the harness.',
@@ -916,20 +903,37 @@ async function cleanupFailedPreparation(
   repositoryRoot: string,
   worktreePath: string | undefined,
   branch: string | undefined,
-): Promise<void> {
-  if (worktreePath) {
-    // Ask Git to unregister the checkout even if a failing hook removed its
-    // directory before returning; otherwise the branch can remain checked out.
-    await git(repositoryRoot, [
-      'worktree',
-      'remove',
-      '--force',
-      worktreePath,
-    ]).catch(() => undefined);
-    rmSync(worktreePath, { recursive: true, force: true });
-  }
-  if (branch) {
-    await git(repositoryRoot, ['branch', '-D', branch]).catch(() => undefined);
+): Promise<boolean> {
+  try {
+    if (worktreePath) {
+      // A failing checkout hook may have removed the directory already.
+      await git(repositoryRoot, [
+        'worktree',
+        'remove',
+        '--force',
+        worktreePath,
+      ]).catch(() => undefined);
+      rmSync(worktreePath, { recursive: true, force: true });
+    }
+    if (branch) {
+      await git(repositoryRoot, ['branch', '-D', branch]).catch(
+        () => undefined,
+      );
+      if (
+        await gitText(repositoryRoot, [
+          'for-each-ref',
+          '--format=%(refname)',
+          `refs/heads/${branch}`,
+        ])
+      )
+        return false;
+    }
+    return !(await registeredWorktrees(repositoryRoot)).some(
+      (entry) => entry.path === worktreePath,
+    );
+  } catch {
+    // The preparing record remains the durable handle for explicit cleanup.
+    return false;
   }
 }
 

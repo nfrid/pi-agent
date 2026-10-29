@@ -578,6 +578,66 @@ async function isolatedServiceFixture(
   };
 }
 
+it('retains a durable interrupted preparation until its checkout is explicitly retired', async () => {
+  const fixture = await isolatedServiceFixture();
+  try {
+    const created = (await fixture.service.createThread(fixture.projectId, {
+      commandId: 'interrupted-preparation',
+      title: 'Interrupted setup',
+      prompt: 'Do not launch from incomplete setup.',
+      isolation: 'worktree',
+    })) as { run: { id: string; checkoutId: string } };
+    const checkoutId = created.run.checkoutId;
+    const prepared = await fixture.service
+      .creatorFor({ id: checkoutId })
+      .prepareWorktree({
+        cwd: fixture.root,
+        name: 'Interrupted setup',
+        base: 'head',
+      });
+    const record = prepared.worktree?.record;
+    if (!record) throw new Error('preparation failed');
+    record.status = 'preparing';
+    fixture.metadata.orchestration.writeWorktreeRecord(checkoutId, record);
+    const reopened = new MetadataStore(
+      path.join(fixture.state, 'dashboard.sqlite'),
+    );
+    try {
+      expect(
+        reopened.orchestration.loadWorktreeRecord(checkoutId)?.status,
+      ).toBe('preparing');
+    } finally {
+      reopened.close();
+    }
+
+    await fixture.service.start();
+    await waitFor(
+      () =>
+        fixture.metadata.orchestration.getRun(created.run.id)?.status ===
+        'failed',
+    );
+    await fixture.service.stop();
+    expect(fixture.launches).toEqual([]);
+    expect(
+      fixture.metadata.orchestration.getRun(created.run.id)?.error,
+    ).toMatch(/interrupted/);
+    expect(
+      fixture.metadata.orchestration.loadWorktreeRecord(checkoutId)?.status,
+    ).toBe('preparing');
+    await access(record.worktreePath);
+    await fixture.service.retireCheckout(checkoutId, 'retire-interrupted');
+    expect(
+      fixture.metadata.orchestration.loadWorktreeRecord(checkoutId),
+    ).toBeUndefined();
+    await expect(access(record.worktreePath)).rejects.toThrow();
+    expect(
+      (await gitOutput(fixture.root, 'branch', '--list', record.branch)).trim(),
+    ).toBe('');
+  } finally {
+    await fixture.close();
+  }
+});
+
 it('drains a rejected production execution during shutdown', async () => {
   const fixture = await isolatedServiceFixture();
   try {
@@ -2193,7 +2253,7 @@ describe('OrchestrationService', () => {
     }
   });
 
-  it('reuses a released same-title worktree after a pre-runtime launch failure', async () => {
+  it('prepares an independent same-title worktree after a pre-runtime launch failure', async () => {
     const fixture = await isolatedServiceFixture();
     try {
       const first = (await fixture.service.createThread(fixture.projectId, {
@@ -2224,25 +2284,15 @@ describe('OrchestrationService', () => {
       expect(repository.getCheckout(second.run.checkoutId)).toMatchObject({
         status: 'ready',
       });
-      const releasedPath = path.join(
-        fixture.root,
-        '.worktrees',
-        `.same-title.released-${first.run.checkoutId}`,
-      );
-      expect(repository.getCheckout(first.run.checkoutId)).toMatchObject({
+      const firstCheckout = repository.getCheckout(first.run.checkoutId);
+      const secondCheckout = repository.getCheckout(second.run.checkoutId);
+      expect(firstCheckout).toMatchObject({
         status: 'failed',
-        path: releasedPath,
+        path: path.join(fixture.root, '.worktrees', 'same-title'),
+        branch: 'pi/same-title',
       });
-      expect(path.isAbsolute(releasedPath)).toBe(true);
-      expect(releasedPath).not.toBe(
-        path.join(fixture.root, '.worktrees', 'same-title'),
-      );
-      expect(repository.getCheckout(first.run.checkoutId)).not.toHaveProperty(
-        'branch',
-      );
-      expect(repository.getCheckout(first.run.checkoutId)).not.toHaveProperty(
-        'baseSha',
-      );
+      expect(secondCheckout?.path).not.toBe(firstCheckout?.path);
+      expect(secondCheckout?.branch).not.toBe(firstCheckout?.branch);
     } finally {
       await fixture.close();
     }

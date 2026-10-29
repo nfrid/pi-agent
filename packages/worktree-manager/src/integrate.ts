@@ -112,6 +112,8 @@ export interface MergeOutcome {
 export type BranchReviewMode = 'full' | 'incremental';
 
 export type BranchState =
+  /** Setup did not reach a runnable checkout; only explicit cleanup is safe. */
+  | 'preparing'
   /** No delegate work from this branch remains to apply to HEAD. */
   | 'merged'
   /** The branch has delegate work the repository's HEAD does not. */
@@ -275,6 +277,7 @@ export function createWorktreeIntegrator(
   }
 
   async function branchState(record: WorktreeRecord): Promise<BranchState> {
+    if (record.status === 'preparing') return 'preparing';
     const root = record.repositoryRoot;
     if (
       !(await succeeds(root, [
@@ -654,10 +657,16 @@ export function createWorktreeIntegrator(
     const metadata = (getSummary: () => BranchReviewPathSummary) =>
       resolved.active ? reviewMetadata(resolved, getSummary()) : {};
     const state = await branchState(record);
-    if (state === 'gone')
+    if (state === 'gone' || state === 'preparing')
       return {
         state,
         mode,
+        ...(state === 'preparing'
+          ? {
+              error:
+                'Worktree setup is incomplete; remove it explicitly before retrying.',
+            }
+          : {}),
         log: '',
         stat: '',
         diff: '',
@@ -805,6 +814,12 @@ export function createWorktreeIntegrator(
     record: WorktreeRecord,
     options: MergeOptions = {},
   ): Promise<MergeOutcome> {
+    if (record.status === 'preparing')
+      return {
+        merged: false,
+        reason:
+          'Worktree setup is incomplete; remove it explicitly before retrying.',
+      };
     const commitMessage = options.commitMessage;
     const squash = commitMessage !== undefined;
     if (commitMessage !== undefined && !commitMessage.trim())

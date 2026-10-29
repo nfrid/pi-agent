@@ -1,7 +1,11 @@
 import { existsSync, rmSync } from 'node:fs';
 import { validateRecordedWorktree, withWorktreePathLock } from './create.js';
 import { git, gitText, splitZ } from './git.js';
-import { type WorktreeRecord, workBase } from './model.js';
+import {
+  assertWorktreePrepared,
+  type WorktreeRecord,
+  workBase,
+} from './model.js';
 import type { WorktreeStore } from './store.js';
 
 const COMMIT_SUBJECT_MAX = 72;
@@ -91,6 +95,7 @@ export function createWorktreeFinisher<
   ): Promise<Record> {
     const record = store.loadWorktree(id);
     if (!record) throw new Error(`Unknown worktree ${id}`);
+    assertWorktreePrepared(record);
     if (!existsSync(record.worktreePath)) {
       // A caller-owned checkout is never removed or reclassified as a
       // harness-managed resource merely because its path disappeared.
@@ -209,6 +214,7 @@ export function createWorktreeFinisher<
   async function retireWorktreeSnapshot(id: string): Promise<Record> {
     const record = store.loadWorktree(id);
     if (!record) throw new Error(`Unknown worktree ${id}`);
+    assertWorktreePrepared(record);
     if (record.ownership === 'caller') {
       // Caller-owned checkouts remain available for the caller and for
       // continuations; only the harness lifecycle record is settled.

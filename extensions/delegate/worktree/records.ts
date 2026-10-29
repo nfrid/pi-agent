@@ -140,7 +140,8 @@ function validRecord(value: unknown, id: string): value is WorktreeRecord {
         !Number.isNaN(Date.parse(record.integratedAt)))) &&
     typeof record.workingDirectory === 'string' &&
     !path.isAbsolute(record.workingDirectory) &&
-    (record.status === 'active' ||
+    (record.status === 'preparing' ||
+      record.status === 'active' ||
       record.status === 'finished' ||
       record.status === 'removed') &&
     (record.runOutcome === undefined ||

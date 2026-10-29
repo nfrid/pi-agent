@@ -12,7 +12,8 @@ export type WorktreeBase =
   /** The parent's last commit, ignoring uncommitted work. */
   | 'head';
 
-export type WorktreeStatus = 'active' | 'finished' | 'removed';
+/** Preparing resources are recorded before Git setup and cannot launch a run. */
+export type WorktreeStatus = 'preparing' | 'active' | 'finished' | 'removed';
 export type WorktreeRunOutcome = 'timed-out' | 'aborted' | 'error';
 /** Whether the harness owns the checkout lifecycle or only records it. */
 export type WorktreeOwnership = 'harness' | 'caller';
@@ -54,6 +55,14 @@ export interface WorktreeRecord {
   runOutcome?: WorktreeRunOutcome;
   /** A clean read-only snapshot whose checkout was retired but whose ref remains resumable. */
   snapshot?: boolean;
+}
+
+/** Incomplete setup may only be inspected or explicitly removed. */
+export function assertWorktreePrepared(record: WorktreeRecord): void {
+  if (record.status === 'preparing')
+    throw new Error(
+      `Worktree ${record.id} setup is incomplete or interrupted. Remove it explicitly before retrying; its original WIP snapshot is not guaranteed complete.`,
+    );
 }
 
 /** The commit the agent's own work starts from. */

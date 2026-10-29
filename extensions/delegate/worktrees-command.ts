@@ -47,11 +47,14 @@ export function registerDelegateWorktreesCommand(pi: ExtensionAPI): void {
       if (action === 'show') {
         const state = await branchState(record);
         const detail = formatBranchDetail({ record, state });
-        const guidance = record.snapshot
-          ? `Drop:     /delegate-worktrees ${id} drop`
-          : record.ownership === 'caller'
-            ? `Manage:    review or merge this caller-owned branch in its checkout\nRelease:   /delegate-worktrees ${id} drop`
-            : `Changes:   use delegate_changes with the workflow node that produced this record\nDiscard:   /delegate-worktrees ${id} drop`;
+        const guidance =
+          record.status === 'preparing'
+            ? 'Do not remove resources while their creating process is still running.'
+            : record.snapshot
+              ? `Drop:     /delegate-worktrees ${id} drop`
+              : record.ownership === 'caller'
+                ? `Manage:    review or merge this caller-owned branch in its checkout\nRelease:   /delegate-worktrees ${id} drop`
+                : `Changes:   use delegate_changes with the workflow node that produced this record\nDiscard:   /delegate-worktrees ${id} drop`;
         ctx.ui.notify(`${detail}\n\n${guidance}`, 'info');
         return;
       }

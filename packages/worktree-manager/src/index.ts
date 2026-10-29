@@ -62,5 +62,5 @@ export type {
   WorktreeStatus,
   WorktreeSummary,
 } from './model.js';
-export { workBase, worktreeSummary } from './model.js';
+export { assertWorktreePrepared, workBase, worktreeSummary } from './model.js';
 export type { WorktreeStore } from './store.js';

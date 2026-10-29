@@ -267,7 +267,7 @@ describe('worktree preparation', () => {
 
   test('creates a named branch nobody else is on', async () => {
     const worktree = await prepared({ name: 'Implement the thing' });
-    expect(worktree.record.branch).toBe('pi/implement-the-thing');
+    expect(worktree.record.branch).toMatch(/^pi\/implement-the-thing-/);
     expect(existsSync(worktree.record.worktreePath)).toBe(true);
     expect(
       git(worktree.record.worktreePath, ['rev-parse', '--abbrev-ref', 'HEAD']),

@@ -448,7 +448,7 @@ export async function execute(
         const record = host.worktreeRecord(
           host.repository.getCheckout(checkout.id) ?? checkout,
         );
-        if (record) {
+        if (record && record.status !== 'preparing') {
           const discarded = await createWorktreeFinisher(
             host.storeFor(checkout),
           ).discardFreshWorktree(record.id);

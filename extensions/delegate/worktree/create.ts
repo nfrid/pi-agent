@@ -4,6 +4,7 @@ import type {
   CaptureWorkInProgressOptions,
 } from '@pi-dashboard/worktree-manager';
 import {
+  assertWorktreePrepared,
   canonical,
   captureWorkInProgress as captureGenericWorkInProgress,
   createWorktreeCreator,
@@ -89,6 +90,7 @@ export function restoreWorktreeSession(
   record: WorktreeRecord,
   token: string,
 ): PreparedWorktree {
+  assertWorktreePrepared(record);
   if (!existsSync(record.worktreePath))
     throw new Error('The worktree for this continuation is unavailable.');
   if (record.sessionToken && record.sessionToken !== token)

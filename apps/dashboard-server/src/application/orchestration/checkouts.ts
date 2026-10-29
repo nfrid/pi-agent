@@ -125,6 +125,7 @@ export async function retireCheckout(
   if (record)
     await createWorktreeFinisher(host.storeFor(checkout)).removeWorktree(
       record.id,
+      { deleteBranch: record.status === 'preparing' },
     );
   const result = host.repository.transitionCheckout(checkoutId, 'retired');
   host.saveReceipt(commandId, 'checkout.retire', result);
