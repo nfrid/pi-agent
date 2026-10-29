@@ -38,11 +38,12 @@ The LaunchAgent templates include `~/.bun/bin` in `PATH`; preserve that entry wh
 
 ## Local macOS notifications
 
-The optional native adapter is for the installed local Chrome PWA at
+By default, the optional native adapter opens the installed local Chrome PWA at
 `/Applications/Pi Dashboard.app`, bundle ID
 `com.google.Chrome.app.famamklipjamakjadikolcemgkfbbpek`, whose shortcut URL is
-`http://127.0.0.1:4174/`. It never opens a URL through the default browser and
-never targets the HTTPS app under `~/Applications/Chrome Apps.localized`.
+`http://127.0.0.1:4174/`. This default (`chrome-pwa`) never falls back to a
+browser when the PWA is missing or its bundle/shortcut validation fails. Neither
+mode targets the HTTPS app under `~/Applications/Chrome Apps.localized`.
 Phone and public HTTPS clients continue to use Web Push.
 
 Build and test without installation, permission prompts, or live notifications:
@@ -111,6 +112,57 @@ batch. This design does not depend on
 Chrome launch flags, app-shim argument forwarding, manifest launch defaults,
 Accessibility permission, or browser scripting.
 
+### Optional default-browser click target
+
+To open notification links in Firefox when it is already your macOS default
+browser, opt in on the Mac running the helper:
+
+```sh
+defaults write com.pi.dashboard.notifications dashboardOpenMode -string default-browser
+```
+
+Restart only the notification helper (quit `Pi Dashboard Notifications` in
+Activity Monitor; the API relaunches it on the next control/delivery request),
+or apply the preference before launching it. Do not restart the runtime or
+process host. This persistent helper preference also applies when macOS
+cold-launches it for a notification click. It does not change the default
+browser, Firefox profiles, or Chrome configuration. To restore the original
+behavior, write `chrome-pwa` instead; an absent key also means `chrome-pwa`.
+Unknown mode strings reject clicks rather than falling back.
+
+In `default-browser` mode the helper uses `NSWorkspace.open` with the validated
+local URL. It does not inspect the Chrome PWA or send a `click` event over the
+Unix socket, so an open PWA cannot consume this navigation. The socket still
+carries notification delivery, permission/status requests, and diagnostics.
+Both modes accept only `http://127.0.0.1:4174/`, `/sessions/<encoded-id>` and
+`/runtimes/<encoded-id>`, without credentials, query strings, fragments, or
+control characters in the decoded ID. No arbitrary origin or launch command
+is configurable.
+
+First open `http://127.0.0.1:4174/` in the target browser/profile and enter the
+existing Dashboard token in its normal authentication prompt. Firefox does not
+inherit Chrome's localStorage. A click without a saved token shows that same
+prompt; submitting it reloads the current deep link, preserving the target.
+Tokens are never placed in notification URLs, helper preferences, or launch
+arguments. API authentication and Origin/Referer restrictions remain unchanged.
+The Dashboard daemon and web preview must be running.
+
+This option changes only where clicks open. Native permission/enablement and
+foreground reporting still use the existing installed-PWA UI; enable native
+notifications there first if they are not already enabled. The saved native
+enablement survives closing the PWA. Ordinary browser tabs do not consume the
+PWA click stream or report native foreground suppression, so notifications can
+still arrive while the target session is focused in Firefox. The default browser
+may open a new tab on each click; selecting a particular Firefox profile or
+reusing a particular tab is outside this option. Web Push subscriptions and
+delivery to other devices are unchanged.
+
+`bun run dashboard:notifications test` exercises both dispatch modes with fake
+openers: default PWA validation and socket-before-activation order, missing PWA
+without fallback, direct browser opening without a PWA/socket event, opener
+failure, unknown modes, and rejected URLs before any side effects. It neither
+launches a browser nor modifies preferences or requests OS permission.
+
 ### Parent-owned live verification
 
 After installation and dashboard-only deployment, set `API_ORIGIN` to the
@@ -129,6 +181,12 @@ active, switches to the exact thread, and leaves Arc and browser tabs alone.
 Repeat with the PWA closed. Then enable notifications explicitly and verify one
 approved real notification and its click, including a cold helper callback.
 Check focused matching-thread suppression and delivery after lease expiry.
+For the opt-in browser mode, repeat the diagnostic with the PWA open and
+closed: the configured default browser must load the exact session while the
+PWA stays on its previous route. Also check a fresh browser profile: the token
+prompt must preserve the deep link after authentication. Repeat a real click
+with a cold helper launch. A browser-mode `diagnostic` response reports only
+that LaunchServices accepted the URL, not successful authentication or loading.
 Neither build/tests nor the diagnostic response prove OS focus or notification
 permission. These live checks remain deployment gates.
 
