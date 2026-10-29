@@ -6,6 +6,23 @@ let dashboardOrigin = "http://127.0.0.1:4174"
 let dashboardBundle = "com.google.Chrome.app.famamklipjamakjadikolcemgkfbbpek"
 let dashboardApp = URL(fileURLWithPath: "/Applications/Pi Dashboard.app")
 
+func externalURL(_ value: String) -> URL? {
+    guard value.utf8.count <= 2048,
+          !value.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }),
+          let components = URLComponents(string: value),
+          let scheme = components.scheme?.lowercased(), ["http", "https"].contains(scheme),
+          let host = components.host, !host.isEmpty,
+          components.user == nil, components.password == nil,
+          let url = components.url,
+          !(scheme == "http" && host.lowercased() == "127.0.0.1" && (components.port ?? 80) == 4174) else { return nil }
+    return url
+}
+
+@discardableResult func openExternal(_ value: String, opener: (URL) -> Bool) -> Bool {
+    guard let url = externalURL(value) else { return false }
+    return opener(url)
+}
+
 func clickPath(_ value: String) -> String? {
     guard let url = URLComponents(string: value), url.scheme == "http", url.host == "127.0.0.1", url.port == 4174,
           url.user == nil, url.password == nil, url.query == nil, url.fragment == nil else { return nil }
@@ -14,6 +31,37 @@ func clickPath(_ value: String) -> String? {
     guard parts.count == 3, parts[0].isEmpty, ["sessions", "runtimes"].contains(String(parts[1])), let id = String(parts[2]).removingPercentEncoding,
           !id.isEmpty, !id.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }) else { return nil }
     return url.percentEncodedPath
+}
+
+// A helper-local preference, independent of the daemon environment, also works
+// when macOS cold-launches the helper for a delivered notification.
+enum DashboardOpenMode: String {
+    case chromePWA = "chrome-pwa"
+    case defaultBrowser = "default-browser"
+}
+
+// Keep validation and side-effect selection shared by diagnostics and OS clicks.
+// Browser navigation must not enqueue a PWA click: an open PWA could consume it.
+@discardableResult func openDashboardClick(
+    _ value: String,
+    mode: String?,
+    pwaIsValid: () -> Bool,
+    sendClick: (String) -> Void,
+    activatePWA: () -> Void,
+    openBrowser: (URL) -> Bool
+) -> Bool {
+    guard let path = clickPath(value),
+          let selected = DashboardOpenMode(rawValue: mode ?? DashboardOpenMode.chromePWA.rawValue),
+          let url = URL(string: dashboardOrigin + path) else { return false }
+    switch selected {
+    case .chromePWA:
+        guard pwaIsValid() else { return false }
+        sendClick(value)
+        activatePWA()
+        return true
+    case .defaultBrowser:
+        return openBrowser(url)
+    }
 }
 
 struct NotificationPayload {
@@ -43,7 +91,65 @@ if CommandLine.arguments.contains("--self-test") {
     let payload = NotificationPayload(decoded)!
     precondition(payload.title == "Project · literal" && payload.subtitle == "Thread" && payload.body == "Plain preview")
     precondition(NotificationPayload(["type": "notify", "id": "bad", "url": "https://pi.nfrid.me/sessions/a"]) == nil)
-    print("Native click and notification protocol validation passed")
+    var externalEffects: [String] = []
+    let external = "https://example.com/a"
+    precondition(openExternal(external) { externalEffects.append($0.absoluteString); return true })
+    precondition(externalEffects == [external])
+    externalEffects = []
+    precondition(!openExternal(external) { _ in externalEffects.append("opened"); return false })
+    precondition(externalEffects == ["opened"])
+    for invalid in [
+        dashboardOrigin, "http://user@example.com/", "http://@example.com/", "javascript:alert(1)",
+        "file:///tmp/a", "https://example.com/" + String(UnicodeScalar(10)!), String(repeating: "a", count: 2049)
+    ] {
+        precondition(!openExternal(invalid) { _ in externalEffects.append("invalid"); return true })
+    }
+    precondition(externalEffects == ["opened"])
+    // Exercise the actual dispatcher with recorded effects, never real apps.
+    let target = dashboardOrigin + "/sessions/a%2Fb"
+    var effects: [String] = []
+    func dispatch(_ value: String, _ mode: String?, validPWA: Bool = true, browserAccepted: Bool = true) -> Bool {
+        effects = []
+        return openDashboardClick(value, mode: mode, pwaIsValid: {
+            effects.append("validate-pwa")
+            return validPWA
+        }, sendClick: { effects.append("socket:" + $0) }, activatePWA: {
+            effects.append("activate-pwa")
+        }, openBrowser: {
+            effects.append("browser:" + $0.absoluteString)
+            return browserAccepted
+        })
+    }
+    for mode in [nil, "chrome-pwa"] as [String?] {
+        precondition(dispatch(target, mode))
+        precondition(effects == ["validate-pwa", "socket:" + target, "activate-pwa"])
+        precondition(!dispatch(target, mode, validPWA: false))
+        precondition(effects == ["validate-pwa"]) // no implicit browser fallback
+    }
+    for path in ["/", "/sessions/a%2Fb", "/runtimes/runtime%2Fone"] {
+        let url = dashboardOrigin + path
+        precondition(dispatch(url, "default-browser", validPWA: false))
+        precondition(effects == ["browser:" + url]) // no bundle lookup or socket click
+    }
+    precondition(!dispatch(target, "default-browser", browserAccepted: false))
+    precondition(effects == ["browser:" + target])
+    precondition(!dispatch(target, "unknown"))
+    precondition(effects.isEmpty)
+    for mode in [nil, "chrome-pwa", "default-browser"] as [String?] {
+        for invalid in [
+            "https://pi.nfrid.me/sessions/a", "http://localhost:4174/sessions/a",
+            "http://127.0.0.1:4173/sessions/a", "https://127.0.0.1:4174/sessions/a",
+            "file:///sessions/a", "http://user@127.0.0.1:4174/sessions/a",
+            dashboardOrigin + "/api/sessions/a", dashboardOrigin + "/sessions/a/b",
+            dashboardOrigin + "/sessions/", dashboardOrigin + "/sessions/%00",
+            dashboardOrigin + "/runtimes/%7F", dashboardOrigin + "/sessions/a?token=secret",
+            dashboardOrigin + "/sessions/a#secret", dashboardOrigin + "/?x=1"
+        ] {
+            precondition(!dispatch(invalid, mode))
+            precondition(effects.isEmpty)
+        }
+    }
+    print("Native click, external opening, and notification protocol validation passed")
     exit(0)
 }
 
@@ -103,30 +209,44 @@ if CommandLine.arguments.contains("--self-test") {
     }
     private func command(_ message: [String: Any]) {
         guard let type = message["type"] as? String, let id = message["id"] as? String else { return }
-        if type == "status" { status(id); return }
-        if type == "click", let url = message["url"] as? String { let accepted = click(url); send(["type": "status", "id": id, "permission": accepted ? "diagnostic" : "invalidTarget"]); return }
-        if type == "authorize" {
-            center.requestAuthorization(options: [.alert]) { _, _ in DispatchQueue.main.async { self.status(id) } }
+        switch type {
+        case "status":
+            status(id)
+        case "openExternal":
+            guard let value = message["url"] as? String else { return }
+            let opened = openExternal(value) { NSWorkspace.shared.open($0) }
+            send(["type": "status", "id": id, "permission": opened ? "opened" : "failed"])
+        case "click":
+            guard let url = message["url"] as? String else { return }
+            let accepted = click(url)
+            send(["type": "status", "id": id, "permission": accepted ? "diagnostic" : "invalidTarget"])
+        case "authorize":
+            center.requestAuthorization(options: [.alert]) { _, _ in
+                DispatchQueue.main.async { self.status(id) }
+            }
+        case "notify":
+            guard let payload = NotificationPayload(message) else { return }
+            let content = UNMutableNotificationContent()
+            content.title = payload.title
+            content.subtitle = payload.subtitle
+            content.body = payload.body
+            content.userInfo = ["url": payload.url]
+            center.add(UNNotificationRequest(identifier: payload.id, content: content, trigger: nil)) { _ in }
+        default:
             return
         }
-        guard let payload = NotificationPayload(message) else { return }
-        let content = UNMutableNotificationContent()
-        content.title = payload.title
-        content.subtitle = payload.subtitle
-        content.body = payload.body
-        content.userInfo = ["url": payload.url]
-        center.add(UNNotificationRequest(identifier: payload.id, content: content, trigger: nil)) { _ in }
     }
     // The diagnostic and OS callbacks deliberately share this handler.
     @discardableResult private func click(_ value: String) -> Bool {
-        guard clickPath(value) != nil, let bundle = Bundle(url: dashboardApp), bundle.bundleIdentifier == dashboardBundle,
-              let shortcut = bundle.object(forInfoDictionaryKey: "CrAppModeShortcutURL") as? String,
-              shortcut == dashboardOrigin + "/" else { return false }
-        send(["type": "click", "url": value])
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
-        NSWorkspace.shared.openApplication(at: dashboardApp, configuration: configuration) { _, _ in }
-        return true
+        openDashboardClick(value, mode: UserDefaults.standard.string(forKey: "dashboardOpenMode"), pwaIsValid: {
+            guard let bundle = Bundle(url: dashboardApp), bundle.bundleIdentifier == dashboardBundle,
+                  let shortcut = bundle.object(forInfoDictionaryKey: "CrAppModeShortcutURL") as? String else { return false }
+            return shortcut == dashboardOrigin + "/"
+        }, sendClick: { self.send(["type": "click", "url": $0]) }, activatePWA: {
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            NSWorkspace.shared.openApplication(at: dashboardApp, configuration: configuration) { _, _ in }
+        }, openBrowser: { NSWorkspace.shared.open($0) })
     }
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let value = response.notification.request.content.userInfo["url"] as? String

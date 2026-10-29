@@ -10,6 +10,7 @@ import {
   NATIVE_ORIGIN,
   NativeNotifications,
   nativeClickPath,
+  nativeExternalUrl,
 } from './native-notifications.js';
 import { PushForegroundClients } from './push.js';
 import { type DashboardRouteContext, dashboardRoutes } from './routes.js';
@@ -37,6 +38,22 @@ it('scopes native tRPC to the PWA Origin or its same-origin EventSource Referer'
   );
   expect(nativeOriginAllowed(undefined, 'https://pi.nfrid.me/')).toBe(false);
   expect(nativeOriginAllowed(undefined, undefined)).toBe(false);
+});
+
+it('accepts only absolute external HTTP(S) URLs outside the native PWA origin', () => {
+  expect(nativeExternalUrl('https://example.com/path')).toBeInstanceOf(URL);
+  expect(nativeExternalUrl('http://example.com')).toBeInstanceOf(URL);
+  for (const value of [
+    NATIVE_ORIGIN,
+    `${NATIVE_ORIGIN}/sessions/a`,
+    'javascript:alert(1)',
+    'file:///tmp/a',
+    'https://user@example.com/',
+    'http://@example.com/',
+    'https://example.com/\n',
+    `https://example.com/${'a'.repeat(2048)}`,
+  ])
+    expect(nativeExternalUrl(value)).toBeUndefined();
 });
 
 it('accepts only exact local supported click routes', () => {
@@ -87,14 +104,44 @@ it('requires enable, separates names, preserves fault meaning, and suppresses na
         const message = JSON.parse(buffer.slice(0, end));
         buffer = buffer.slice(end + 1);
         messages.push(message);
-        if (['authorize', 'status', 'click'].includes(message.type))
+        if (
+          ['authorize', 'status', 'click', 'openExternal'].includes(
+            message.type,
+          )
+        )
           socket?.write(
-            `${JSON.stringify({ type: 'status', id: message.id, permission })}\n`,
+            `${JSON.stringify({
+              type: 'status',
+              id: message.id,
+              permission:
+                message.type === 'openExternal'
+                  ? message.url === 'https://example.com/fail'
+                    ? 'failed'
+                    : 'opened'
+                  : permission,
+            })}\n`,
           );
       }
     });
     native.notify(event, presentation);
     expect(messages).toHaveLength(0);
+    expect(
+      await native.control('openExternal', 'https://example.com'),
+    ).toMatchObject({
+      enabled: false,
+      permission: 'opened',
+    });
+    expect(
+      await native.control('openExternal', 'https://example.com/fail'),
+    ).toMatchObject({
+      enabled: false,
+      permission: 'failed',
+    });
+    expect(
+      messages.filter((message) => message.type === 'openExternal'),
+    ).toHaveLength(2);
+    expect(native.isEnabled()).toBe(false);
+    expect(native.click()).toBeUndefined();
     permission = 'denied';
     expect((await native.control('enable')).enabled).toBe(false);
     native.notify(event, presentation);
@@ -103,6 +150,12 @@ it('requires enable, separates names, preserves fault meaning, and suppresses na
     ).toHaveLength(0);
     permission = 'authorized';
     expect((await native.control('enable')).enabled).toBe(true);
+    expect(
+      await native.control('openExternal', 'https://example.com/enabled'),
+    ).toMatchObject({ enabled: true, permission: 'opened' });
+    expect(
+      await native.control('openExternal', 'https://example.com/fail'),
+    ).toMatchObject({ enabled: true, permission: 'failed' });
     native.notify(event, presentation);
     await vi.waitFor(() =>
       expect(
@@ -151,6 +204,8 @@ it('requires enable, separates names, preserves fault meaning, and suppresses na
       expect(native.click()?.path).toBe('/sessions/thread%2Fone'),
     );
     const click = native.click();
+    await native.control('openExternal', 'https://example.com/pending');
+    expect(native.click()).toEqual(click);
     native.acknowledge('other');
     expect(native.click()).toEqual(click);
     native.acknowledge(click?.id ?? '');
@@ -456,9 +511,13 @@ describe('native authenticated local handshake', () => {
   it('removes only the enabling browser endpoint, preserves phone, and rejects other origins and unauthenticated control', async () => {
     const subscriptions = new Set(['mac', 'phone']);
     const control = vi.fn(
-      async (_action: string, _url?: string, beforeEnable?: () => void) => {
+      async (action: string, _url?: string, beforeEnable?: () => void) => {
         beforeEnable?.();
-        return { available: true, enabled: true, permission: 'authorized' };
+        return {
+          available: true,
+          enabled: action !== 'openExternal',
+          permission: action === 'openExternal' ? 'opened' : 'authorized',
+        };
       },
     );
     const click = vi.fn(() => ({ id: 'click', path: '/' }));
@@ -468,12 +527,13 @@ describe('native authenticated local handshake', () => {
       acknowledge() {},
       isEnabled: () => true,
     } as unknown as NativeNotifications;
+    let nativeAdapter: NativeNotifications | undefined = native;
     const app = Fastify();
     const context = {
       token: 'isolated-token',
       serverId: () => 'test',
       origins: () => [NATIVE_ORIGIN, 'https://pi.nfrid.me'],
-      nativeNotifications: () => native,
+      nativeNotifications: () => nativeAdapter,
       removePushSubscription: (endpoint: string) =>
         subscriptions.delete(endpoint),
       snapshot: () => ({
@@ -541,6 +601,117 @@ describe('native authenticated local handshake', () => {
       });
       expect(mixedBatch.body).toContain('FORBIDDEN');
       expect(control).not.toHaveBeenCalled();
+      const externalHeaders = {
+        origin: NATIVE_ORIGIN,
+        'x-dashboard-token': 'isolated-token',
+        'x-dashboard-protocol-version': '3',
+        'content-type': 'application/json',
+      };
+      const externalRequest = (
+        url: string,
+        token = 'isolated-token',
+        origin = NATIVE_ORIGIN,
+      ) =>
+        app.inject({
+          method: 'POST',
+          url: '/trpc/nativeOpenExternal',
+          headers: { ...externalHeaders, origin, 'x-dashboard-token': token },
+          payload: { url },
+        });
+      expect((await externalRequest('https://example.com')).statusCode).toBe(
+        200,
+      );
+      expect(control).toHaveBeenLastCalledWith(
+        'openExternal',
+        'https://example.com',
+      );
+      control.mockResolvedValueOnce({
+        available: false,
+        enabled: false,
+        permission: 'unavailable',
+      });
+      const unavailableExternal = await externalRequest(
+        'https://example.com/unavailable',
+      );
+      expect(unavailableExternal.body).toContain('"opened":false');
+      control.mockResolvedValueOnce({
+        available: true,
+        enabled: true,
+        permission: 'failed',
+      });
+      expect(
+        (await externalRequest('https://example.com/failure')).body,
+      ).toContain('"opened":false');
+      nativeAdapter = undefined;
+      expect(
+        (await externalRequest('https://example.com/no-helper')).body,
+      ).toContain('"opened":false');
+      nativeAdapter = native;
+      const beforeInvalidExternal = control.mock.calls.length;
+      for (const url of [
+        NATIVE_ORIGIN,
+        `${NATIVE_ORIGIN}/sessions/a`,
+        'javascript:alert(1)',
+        'https://user@example.com/',
+        'http://@example.com/',
+        'https://example.com/\n',
+        `https://example.com/${'a'.repeat(2048)}`,
+      ])
+        expect((await externalRequest(url)).statusCode).toBe(400);
+      expect(control).toHaveBeenCalledTimes(beforeInvalidExternal);
+      expect(
+        (await externalRequest('https://example.com', 'wrong')).statusCode,
+      ).toBe(401);
+      expect(
+        (
+          await externalRequest(
+            'https://example.com',
+            'isolated-token',
+            'https://pi.nfrid.me',
+          )
+        ).statusCode,
+      ).toBe(403);
+      expect(control).toHaveBeenCalledTimes(beforeInvalidExternal);
+      const externalBatch = await app.inject({
+        method: 'POST',
+        url: '/trpc/nativeOpenExternal,nativeOpenExternal?batch=1',
+        headers: externalHeaders,
+        payload: {
+          0: { url: 'https://example.com/a' },
+          1: { url: 'https://example.org/b' },
+        },
+      });
+      expect(externalBatch.statusCode).toBe(200);
+      expect(externalBatch.body).toContain('opened');
+      expect(control).toHaveBeenCalledTimes(beforeInvalidExternal + 2);
+      const forbiddenExternalBatch = await app.inject({
+        method: 'POST',
+        url: '/trpc/nativeOpenExternal,nativeOpenExternal?batch=1',
+        headers: { ...externalHeaders, origin: 'https://pi.nfrid.me' },
+        payload: {
+          0: { url: 'https://example.com/a' },
+          1: { url: 'https://example.org/b' },
+        },
+      });
+      expect(forbiddenExternalBatch.body).toContain('FORBIDDEN');
+      expect(control).toHaveBeenCalledTimes(beforeInvalidExternal + 2);
+      const unauthenticatedExternalBatch = await app.inject({
+        method: 'POST',
+        url: '/trpc/nativeOpenExternal,nativeOpenExternal?batch=1',
+        headers: {
+          origin: NATIVE_ORIGIN,
+          'x-dashboard-protocol-version': '3',
+          'content-type': 'application/json',
+        },
+        payload: {
+          0: { url: 'https://example.com/a' },
+          1: { url: 'https://example.org/b' },
+        },
+      });
+      expect(unauthenticatedExternalBatch.statusCode).toBe(401);
+      const externalControlCalls = control.mock.calls.length;
+      expect(control).toHaveBeenCalledTimes(beforeInvalidExternal + 2);
+      expect(click).not.toHaveBeenCalled();
       const encodedClicks = await app.inject({
         method: 'GET',
         url: '/trpc/native%43licks?input=%7B%22json%22%3A%7B%7D%7D',
@@ -552,7 +723,7 @@ describe('native authenticated local handshake', () => {
       });
       expect(encodedClicks.statusCode).toBe(200);
       expect(click).not.toHaveBeenCalled();
-      expect(control).not.toHaveBeenCalled();
+      expect(control).toHaveBeenCalledTimes(externalControlCalls);
       const encodedControl = await app.inject({
         method: 'POST',
         url: '/trpc/native%43ontrol',
@@ -564,7 +735,7 @@ describe('native authenticated local handshake', () => {
         payload: { action: 'enable', endpoint: 'mac' },
       });
       expect(encodedControl.statusCode).toBe(403);
-      expect(control).not.toHaveBeenCalled();
+      expect(control).toHaveBeenCalledTimes(externalControlCalls);
       const phoneForeground = await app.inject({
         method: 'POST',
         url: '/api/push/foreground',
@@ -592,7 +763,7 @@ describe('native authenticated local handshake', () => {
         payload: { action: 'click', url: 'https://pi.nfrid.me/sessions/a' },
       });
       expect(invalidClick.statusCode).toBe(400);
-      expect(control).not.toHaveBeenCalled();
+      expect(control).toHaveBeenCalledTimes(externalControlCalls);
       expect(
         (
           await app.inject({

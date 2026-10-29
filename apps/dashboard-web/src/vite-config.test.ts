@@ -81,7 +81,9 @@ describe('dashboard Vite proxy configuration', () => {
     for (const url of [
       '/trpc/nativeControl',
       '/trpc/nativeClicks?input=%7B%7D',
+      '/trpc/nativeOpenExternal',
       '/trpc/protocolInfo%2CnativeControl?batch=1',
+      '/trpc/protocolInfo%2CnativeOpenExternal?batch=1',
       '/api/push/foreground',
     ]) {
       const headers: Record<string, string> = {};
@@ -174,6 +176,8 @@ describe('dashboard Vite proxy configuration', () => {
       for (const url of [
         '/trpc/nativeControl',
         '/trpc/nativeClicks?input=%7B%7D',
+        '/trpc/nativeOpenExternal',
+        '/trpc/protocolInfo%2CnativeOpenExternal?batch=1',
         '/api/push/foreground',
       ]) {
         const response = await fetch(`${base}${url}`, {
@@ -190,6 +194,8 @@ describe('dashboard Vite proxy configuration', () => {
         headers: { origin: 'http://127.0.0.1:4174' },
       });
       expect(received.map((value) => value.origin)).toEqual([
+        'http://127.0.0.1:4174',
+        'http://127.0.0.1:4174',
         'http://127.0.0.1:4174',
         'http://127.0.0.1:4174',
         'http://127.0.0.1:4174',

@@ -19,6 +19,31 @@ import type {
 
 export const NATIVE_ORIGIN = 'http://127.0.0.1:4174';
 export const NATIVE_ENDPOINT = 'native:installed-pwa';
+export function nativeExternalUrl(value: string): URL | undefined {
+  if (
+    Buffer.byteLength(value, 'utf8') > 2048 ||
+    Array.from(value).some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    })
+  )
+    return;
+  try {
+    const url = new URL(value);
+    if (
+      !['http:', 'https:'].includes(url.protocol) ||
+      !url.hostname ||
+      url.username ||
+      url.password ||
+      /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*@/i.test(value) ||
+      url.origin === NATIVE_ORIGIN
+    )
+      return;
+    return url;
+  } catch {
+    return;
+  }
+}
 type PreferenceWriter = (directory: string, value: boolean) => Promise<void>;
 async function writePreferenceAtomically(
   directory: string,
@@ -232,7 +257,13 @@ export class NativeNotifications {
   }
 
   async control(
-    action: 'status' | 'enable' | 'disable' | 'click' | 'restore',
+    action:
+      | 'status'
+      | 'enable'
+      | 'disable'
+      | 'click'
+      | 'openExternal'
+      | 'restore',
     url?: string,
     beforeEnable?: () => void,
   ): Promise<{ available: boolean; enabled: boolean; permission: string }> {
@@ -240,6 +271,8 @@ export class NativeNotifications {
       return { available: false, enabled: false, permission: 'unavailable' };
     if (action === 'click' && (!url || !nativeClickPath(url)))
       throw new Error('Invalid native click URL.');
+    if (action === 'openExternal' && (!url || !nativeExternalUrl(url)))
+      throw new Error('Invalid native external URL.');
     const attempt =
       action === 'enable' || action === 'disable'
         ? ++this.enableAttempt
@@ -262,7 +295,14 @@ export class NativeNotifications {
     this.launch();
     const id = randomUUID();
     const permission = await new Promise<string>((resolve) => {
-      const message = `${JSON.stringify({ type: action === 'enable' ? 'authorize' : action === 'click' ? 'click' : 'status', id, url })}\n`;
+      const type = {
+        status: 'status',
+        enable: 'authorize',
+        click: 'click',
+        openExternal: 'openExternal',
+        restore: 'status',
+      }[action];
+      const message = `${JSON.stringify({ type, id, url })}\n`;
       const onConnect = (socket: Socket) => socket.write(message);
       const finish = (permission: string) => {
         clearTimeout(timer);
@@ -279,6 +319,12 @@ export class NativeNotifications {
       if (this.socket) this.socket.write(message);
       else this.server?.once('connection', onConnect);
     });
+    if (action === 'openExternal')
+      return {
+        available: permission !== 'unavailable',
+        enabled: this.enabled,
+        permission,
+      };
     if (
       action === 'enable' &&
       permission === 'authorized' &&
